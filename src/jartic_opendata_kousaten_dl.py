@@ -14,6 +14,7 @@
 import argparse
 import json
 import sys
+import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -21,6 +22,8 @@ from pathlib import Path
 CATALOG_URL = "https://www.jartic.or.jp/d/opendata/opendata.json"
 BASE_URL = "https://www.jartic.or.jp/d/opendata"
 UA = {"User-Agent": "Mozilla/5.0 (compatible; jartic-traffic-signal-cycle-converter)"}
+TIMEOUT = 180   # 1ファイル最大70MB。応答が止まったら打ち切って取り直す
+ATTEMPTS = 4
 
 
 def fetch_catalog(url: str = CATALOG_URL) -> dict:
@@ -39,12 +42,25 @@ def download(target: dict, out_dir: Path) -> tuple[str, int]:
     url = BASE_URL + target["link"]
     dest = out_dir / target["link"].split("/")[-1]
     req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=300) as r:
-        size = int(r.headers.get("Content-Length", 0))
-        if dest.exists() and dest.stat().st_size == size and size > 0:
-            return dest.name, 0
-        dest.write_bytes(r.read())
-    return dest.name, dest.stat().st_size
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+                size = int(r.headers.get("Content-Length", 0))
+                if dest.exists() and dest.stat().st_size == size and size > 0:
+                    return dest.name, 0
+                data = r.read()
+            if size and len(data) != size:
+                raise OSError(f"サイズ不一致 {len(data)} != {size}")
+            dest.write_bytes(data)
+            return dest.name, dest.stat().st_size
+        except Exception as e:
+            if attempt == ATTEMPTS:
+                raise SystemExit(f"{dest.name}: {ATTEMPTS}回試みて取得できませんでした（{e}）")
+            wait = 2 ** attempt
+            print(f"  {dest.name}: 取得失敗（{type(e).__name__}）。{wait}秒後に再試行 "
+                  f"[{attempt}/{ATTEMPTS - 1}]", file=sys.stderr, flush=True)
+            time.sleep(wait)
+    raise SystemExit(f"{dest.name}: 取得できませんでした")
 
 
 def main() -> None:

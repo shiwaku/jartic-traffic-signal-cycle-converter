@@ -64,14 +64,38 @@ def load_control_numbers(path: Path) -> dict[str, set]:
     return numbers
 
 
+# 総当たりは件数の階乗になる。北海道の5方面（120通り）が現状の最大だが、将来コードが
+# 増えても破綻しないよう、この数を超えたら貪欲法に切り替える。
+MAX_PERMUTATION_CODES = 7
+
+
 def best_assignment(pages: list[str], codes: list[str], page_nums: dict, code_nums: dict):
     """ページと情報源コードの対応のうち、交差点番号の一致数が最大の組み合わせを返す。"""
+    if len(codes) > MAX_PERMUTATION_CODES:
+        return greedy_assignment(pages, codes, page_nums, code_nums)
     best, best_score = None, -1
     for perm in permutations(codes):
         score = sum(len(page_nums[p] & code_nums.get(c, set())) for p, c in zip(pages, perm))
         if score > best_score:
             best, best_score = perm, score
     return best, best_score
+
+
+def greedy_assignment(pages: list[str], codes: list[str], page_nums: dict, code_nums: dict):
+    """一致数の大きいペアから順に確定させる（総当たりが現実的でない件数のとき）。"""
+    pairs = sorted(
+        ((len(page_nums[p] & code_nums.get(c, set())), p, c) for p in pages for c in codes),
+        key=lambda x: -x[0])
+    assigned: dict[str, str] = {}
+    used_codes: set[str] = set()
+    for score, page, code in pairs:
+        if page in assigned or code in used_codes:
+            continue
+        assigned[page] = code
+        used_codes.add(code)
+    order = tuple(assigned[p] for p in pages)
+    total = sum(len(page_nums[p] & code_nums.get(c, set())) for p, c in zip(pages, order))
+    return order, total
 
 
 def main() -> None:
@@ -113,6 +137,7 @@ def main() -> None:
     page_nums = {n: {x[0] for x in rows} for n, rows in parsed.items()}
 
     rows_out: list[tuple[str, str, str, str]] = []
+    fatal: list[str] = []
     total_hit = total_ctrl = 0
     for pref in sorted(groups):
         pages, codes = groups[pref]["pages"], groups[pref]["codes"]
@@ -126,6 +151,7 @@ def main() -> None:
             print(f"  {name}  情報源コード={code}  位置{len(page_nums[name]):,}件{mark}", flush=True)
             if hit == 0 and ctrl:
                 warnings.append(f"{name}↔{code}: 交差点番号が1件も一致しない")
+                fatal.append(f"{name}↔{code}")
             for number, lon, lat in parsed[name]:
                 rows_out.append((code, number, lon, lat))
 
@@ -141,6 +167,11 @@ def main() -> None:
           file=sys.stderr)
     for w_ in warnings:
         print(f"  警告: {w_}", file=sys.stderr)
+
+    # 1件も一致しないのは、位置情報ページの構造が変わったなどの異常。座標が付かないまま
+    # 先に進むと結合率だけが静かに落ちるため、ここで止める。
+    if fatal:
+        raise SystemExit("交差点番号が一致しないページがあるため中断します: " + ", ".join(fatal))
 
 
 if __name__ == "__main__":

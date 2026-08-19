@@ -8,3 +8,5 @@ interface ImportMeta {
 }
 
 declare const __BUILD_TIME__: string
+/** 収録データの対象年月（data/dataset.json 由来。ビルド時に埋め込まれる） */
+declare const __TARGET_MONTH__: string

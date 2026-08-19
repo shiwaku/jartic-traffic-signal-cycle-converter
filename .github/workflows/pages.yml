@@ -1,8 +1,15 @@
 name: deploy-viewer
 
-# ビューワ（viewer/）をビルドし、リポジトリ同梱の PMTiles（data/）を載せて GitHub Pages へ配信する。
-# 手動実行、または viewer/ か data/ の変更を main に push したときに動く。
+# ビューワ（viewer/）をビルドし、PMTiles を載せて GitHub Pages へ配信する。
+#
+# 信号サイクル長の PMTiles は月次で差し替わるためリポジトリには置かず、data-YYYYMM の
+# Release から最新版を取る（無ければリポジトリ同梱分にフォールバックする）。人口集中地区は
+# 更新されない静的レイヤーなのでリポジトリ同梱のまま。
+#
+# 手動実行、viewer/ か data/ の変更を main に push したとき、および update-data から
+# 呼ばれたときに動く。
 on:
+  workflow_call:
   workflow_dispatch:
   push:
     branches: [main]
@@ -46,11 +53,31 @@ jobs:
           VITE_PMTILES_BASE="$PMTILES_BASE" npm run build
 
       - name: Bundle PMTiles
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           mkdir -p viewer/dist/pmtiles
-          cp data/*.pmtiles viewer/dist/pmtiles/
+
+          # 静的レイヤーはリポジトリ同梱分をそのまま使う。
+          cp data/2020_did_ddsw_01-47_JGD2011.pmtiles viewer/dist/pmtiles/
+
+          # 月次レイヤーは最新の data-YYYYMM Release から取る。
+          tag=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '[.[] | select(.tag_name | startswith("data-"))] | sort_by(.tag_name) | last | .tag_name // empty')
+          if [ -n "$tag" ] && gh release download "$tag" --pattern "signal_cycle.pmtiles" \
+               --dir viewer/dist/pmtiles --clobber; then
+            echo "signal_cycle.pmtiles: Release $tag から取得"
+          elif [ -f data/signal_cycle.pmtiles ]; then
+            cp data/signal_cycle.pmtiles viewer/dist/pmtiles/
+            echo "signal_cycle.pmtiles: リポジトリ同梱分を使用（Release 未作成）"
+          else
+            echo "signal_cycle.pmtiles が Release にもリポジトリにも見つかりません" >&2
+            exit 1
+          fi
+
           touch viewer/dist/.nojekyll
-          echo "同梱: $(ls viewer/dist/pmtiles | wc -l) PMTiles"
+          ls -lh viewer/dist/pmtiles
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
