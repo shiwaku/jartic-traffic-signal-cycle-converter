@@ -14,12 +14,17 @@
 import argparse
 import json
 import sys
+import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 BASE_URL = "https://www.tmt.or.jp/research"
 UA = {"User-Agent": "Mozilla/5.0 (compatible; jartic-traffic-signal-cycle-converter)"}
+# 応答が返らないまま接続が生き続けることがある。1ページで止まると全体が進まないので、
+# 短めのタイムアウトで打ち切って取り直す。
+TIMEOUT = 60
+ATTEMPTS = 4
 
 
 def page_name(target_id: str) -> str:
@@ -33,8 +38,18 @@ def page_name(target_id: str) -> str:
 
 def download(name: str, out_dir: Path) -> tuple[str, int]:
     req = urllib.request.Request(f"{BASE_URL}/{name}", headers=UA)
-    with urllib.request.urlopen(req, timeout=120) as r:
-        data = r.read()
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+                data = r.read()
+            break
+        except Exception as e:  # タイムアウト・切断・一時的なエラー
+            if attempt == ATTEMPTS:
+                raise SystemExit(f"{name}: {ATTEMPTS}回試みて取得できませんでした（{e}）")
+            wait = 2 ** attempt
+            print(f"  {name}: 取得失敗（{type(e).__name__}）。{wait}秒後に再試行 "
+                  f"[{attempt}/{ATTEMPTS - 1}]", file=sys.stderr, flush=True)
+            time.sleep(wait)
     (out_dir / name).write_bytes(data)
     return name, len(data)
 

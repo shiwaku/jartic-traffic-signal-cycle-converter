@@ -1,0 +1,186 @@
+name: update-data
+
+# JARTIC の交差点制御情報を月次で取り込み、品質ゲートを通ったものだけを公開する。
+#
+# JARTIC は最新1か月分しか配布せず、過去月のURLは消える（実測で404）。取り逃すと復旧できない
+# ため、**生zipのアーカイブは品質ゲートより先**に済ませる。ゲートに落ちても生データは残る。
+#
+# 公開日は対象月の約2か月後の1日だが遅れることがあるので、日付では判断せず日次でカタログの
+# 対象年月を見る。差分が無ければ数秒で終わる。
+on:
+  schedule:
+    - cron: "0 20 * * *" # 05:00 JST 毎日
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "品質ゲートに落ちても公開する"
+        type: boolean
+        default: false
+      skip_archive:
+        description: "生zipのアーカイブを省略する（通常は使わない）"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+env:
+  TIPPECANOE_VERSION: "2.79.0"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      updated: ${{ steps.check.outputs.updated }}
+      target_month: ${{ steps.check.outputs.target_month }}
+      release_day: ${{ steps.check.outputs.release_day }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - id: check
+        run: python3 src/run_pipeline.py check
+
+  update:
+    needs: check
+    if: needs.check.outputs.updated == 'true' || inputs.force
+    runs-on: ubuntu-latest
+    # 実測で全体20分程度。外部サイトが応答しなくなったときに走り続けないよう上限を置く。
+    timeout-minutes: 60
+    env:
+      TARGET_MONTH: ${{ needs.check.outputs.target_month }}
+      RAW_ARCHIVE_REPO: ${{ vars.RAW_ARCHIVE_REPO }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Restore tippecanoe
+        id: tippecanoe-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/tippecanoe
+          key: tippecanoe-${{ env.TIPPECANOE_VERSION }}-${{ runner.os }}
+
+      - name: Build tippecanoe
+        if: steps.tippecanoe-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends build-essential libsqlite3-dev zlib1g-dev
+          git clone --depth 1 --branch "$TIPPECANOE_VERSION" https://github.com/felt/tippecanoe.git /tmp/tippecanoe
+          make -C /tmp/tippecanoe -j"$(nproc)"
+          mkdir -p ~/.local/bin
+          cp /tmp/tippecanoe/tippecanoe ~/.local/bin/
+
+      - name: Add tippecanoe to PATH
+        run: |
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          chmod +x ~/.local/bin/tippecanoe
+
+      # --- ここから先、生データの保全を最優先で行う ---
+
+      - name: Download raw data
+        run: python3 src/jartic_opendata_kousaten_dl.py --out work/zip
+
+      - name: Archive raw data to private repository
+        if: ${{ !inputs.skip_archive }}
+        env:
+          GH_TOKEN: ${{ secrets.RAW_ARCHIVE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RAW_ARCHIVE_REPO:-}" ] || [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::生zipの退避先が未設定です。リポジトリ変数 RAW_ARCHIVE_REPO と" \
+                 "シークレット RAW_ARCHIVE_TOKEN を設定してください（README「生データのアーカイブ」参照）"
+            exit 1
+          fi
+          tag="raw-${TARGET_MONTH}"
+          if ! gh release view "$tag" --repo "$RAW_ARCHIVE_REPO" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$RAW_ARCHIVE_REPO" \
+              --title "交差点制御情報 ${TARGET_MONTH}（生データ）" \
+              --notes "JARTIC 交差点制御情報 typeC の配布zipそのまま。対象年月 ${TARGET_MONTH}、公開日 ${{ needs.check.outputs.release_day }}。JARTIC は最新1か月分しか配布しないため退避したもの。"
+          fi
+          gh release upload "$tag" --repo "$RAW_ARCHIVE_REPO" --clobber work/zip/*.zip work/zip/catalog.json
+          echo "退避: $RAW_ARCHIVE_REPO $tag（$(ls work/zip/*.zip | wc -l) ファイル）"
+
+      # --- ここから公開判断 ---
+
+      - name: Run pipeline
+        id: pipeline
+        run: |
+          set -o pipefail
+          python3 src/run_pipeline.py run --work work --skip-download \
+            ${{ inputs.force && '--force' || '' }} 2>&1 | tee work/pipeline.log
+          status=${PIPESTATUS[0]}
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      - name: Report gate failure
+        if: failure() && steps.pipeline.outputs.status == '2'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "対象年月 ${TARGET_MONTH} のデータが品質ゲートに落ちたため、公開を止めました。"
+            echo
+            echo "生zipのアーカイブはゲートより先に済ませているため、生データは失われていません。"
+            echo
+            echo '```'
+            tail -n 40 work/pipeline.log
+            echo '```'
+            echo
+            echo "実行: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } > issue.md
+          gh issue create --title "データ更新が品質ゲートに落ちた（${TARGET_MONTH}）" \
+            --label bug --body-file issue.md
+
+      - name: Publish PMTiles release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="data-${TARGET_MONTH}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --notes-file work/release_notes.md
+          else
+            gh release create "$tag" --title "信号平均サイクル長 ${TARGET_MONTH}" \
+              --notes-file work/release_notes.md
+          fi
+          gh release upload "$tag" --clobber \
+            work/signal_cycle.pmtiles data/join_report.json data/dataset.json
+          cat work/release_notes.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit metadata
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # PMTiles は Release 配布に移したので、リポジトリに残っていれば外す。
+          if [ -f data/signal_cycle.pmtiles ]; then
+            git rm --quiet data/signal_cycle.pmtiles
+          fi
+          git add data/dataset.json data/join_report.json data/source_names.json README.md
+          if git diff --cached --quiet; then
+            echo "変更なし"
+            exit 0
+          fi
+          git commit -F work/commit_message.txt
+          git push origin HEAD:main
+
+  deploy:
+    needs: update
+    uses: ./.github/workflows/pages.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
