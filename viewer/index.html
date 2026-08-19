@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>全国信号サイクル長マップ（2023年2月）</title>
+  <meta name="description" content="JARTIC 交差点制御情報から算出した全国の信号平均サイクル長を、時間帯別に PMTiles で表示するビューワ" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#2a78d6" />
+  <link rel="icon" type="image/png" href="icons/favicon-32.png" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="信号サイクル長" />
+</head>
+<body>
+  <div id="map"></div>
+
+  <section id="panel" class="panel" aria-label="コントロールパネル">
+    <header class="panel-head">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">🚦</span>
+        <h1>全国信号サイクル長マップ<br /><span class="brand-sub">2023年2月</span></h1>
+      </div>
+      <div class="head-actions">
+        <button id="theme-btn" class="icon-btn" type="button" title="テーマ切替" aria-label="テーマ切替"></button>
+        <button id="collapse-btn" class="icon-btn" type="button" title="パネル開閉" aria-label="パネル開閉"></button>
+      </div>
+    </header>
+
+    <div id="panel-body" class="panel-body">
+      <div class="field">
+        <div class="field-head">
+          <span class="field-label">時間帯</span>
+          <div class="field-actions">
+            <button id="play-btn" class="mini-btn" type="button" aria-pressed="false">▶ 再生</button>
+          </div>
+        </div>
+        <div class="hour">
+          <output id="hour-label" class="hour-label" for="hour-slider">0時</output>
+          <input id="hour-slider" class="hour-slider" type="range" min="0" max="23" step="1" value="0"
+                 aria-label="表示する時間帯" />
+          <div class="hour-ticks"><span>0時</span><span>6時</span><span>12時</span><span>18時</span><span>23時</span></div>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-head">
+          <span class="field-label">レイヤー</span>
+          <div class="field-actions">
+            <button id="all-on" class="mini-btn" type="button">全ON</button>
+            <button id="all-off" class="mini-btn" type="button">全OFF</button>
+          </div>
+        </div>
+        <div id="layers" class="toggles"></div>
+      </div>
+    </div>
+
+    <footer class="panel-foot">
+      出典: <a href="https://www.jartic.or.jp/" target="_blank" rel="noopener">日本道路交通情報センター（JARTIC）交差点制御情報</a><br />
+      交差点位置: <a href="https://www.tmt.or.jp/research/index10.html" target="_blank" rel="noopener">日本交通管理技術協会</a><br />
+      人口集中地区: <a href="https://www.e-stat.go.jp/gis" target="_blank" rel="noopener">政府統計の総合窓口（e-Stat）</a><br />
+      背景: 国土地理院 最適化ベクトルタイル / 全国最新写真<br />
+      <a href="https://github.com/shiwaku/jartic-traffic-signal-cycle-converter" target="_blank" rel="noopener">GitHub</a>
+      <span id="build-ver" class="build-ver"></span>
+    </footer>
+  </section>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,60 @@
+name: deploy-viewer
+
+# ビューワ（viewer/）をビルドし、リポジトリ同梱の PMTiles（data/）を載せて GitHub Pages へ配信する。
+# 手動実行、または viewer/ か data/ の変更を main に push したときに動く。
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "viewer/**"
+      - "data/**"
+      - ".github/workflows/pages.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  # base: './' でビルドするため、PMTiles だけは絶対パスで参照する。
+  PMTILES_BASE: /jartic-traffic-signal-cycle-converter/pmtiles
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: viewer/package-lock.json
+
+      - name: Build viewer
+        working-directory: viewer
+        run: |
+          npm ci
+          VITE_PMTILES_BASE="$PMTILES_BASE" npm run build
+
+      - name: Bundle PMTiles
+        run: |
+          mkdir -p viewer/dist/pmtiles
+          cp data/*.pmtiles viewer/dist/pmtiles/
+          touch viewer/dist/.nojekyll
+          echo "同梱: $(ls viewer/dist/pmtiles | wc -l) PMTiles"
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: viewer/dist
+      - id: deployment
+        uses: actions/deploy-pages@v4

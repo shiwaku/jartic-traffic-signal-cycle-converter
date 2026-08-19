@@ -1,0 +1,21 @@
+{
+  "name": "jartic-traffic-signal-cycle-viewer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "JARTIC 交差点制御情報から算出した信号平均サイクル長を MapLibre + PMTiles で表示するビューワ",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "maplibre-gl": "^4.7.1",
+    "pmtiles": "^3.2.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}
