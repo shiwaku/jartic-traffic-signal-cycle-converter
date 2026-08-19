@@ -1,55 +1,147 @@
+# -*- coding: utf-8 -*-
+"""交差点位置情報のHTMLから、交差点番号と座標を取り出してCSVにする。
+
+ページ内の <option value="…" lon="…" lat="…">交差点番号</option> が交差点1件に対応する。
+value 属性は全国通しの連番で、制御情報の交差点番号ではない。**交差点番号はタグのテキスト**。
+（例: 函館のページは value=263 / テキスト=1）
+
+交差点番号は情報源コード（都道府県警察・方面）ごとの連番のため、情報源コードとの組でしか
+一意にならない。ページと情報源コードの対応は、カタログの id（R01_1 / R02 …）から
+ページ名 index10_{都道府県番号}[_{方面番号}].html を組み立てて求める。ただし北海道5方面は
+ページの並びと JARTIC の都市の並びが一致しないため、都道府県ごとに交差点番号の集合が
+最もよく一致する組み合わせを選び直す（対応が正しいことをデータで検証してから採用する）。
+
+出力:
+  {out}/intersection_position.csv  情報源コード,交差点番号,lon,lat
+
+使い方:
+  python3 src/HTMLtoCSV.py --catalog work/zip/catalog.json \
+      --source-codes work/source_codes.json --average work/national_average_cycle.csv \
+      --html work/html --out work
+"""
+import argparse
 import csv
-import glob
-from bs4 import BeautifulSoup
-import os
+import json
+import re
+import sys
+from collections import defaultdict
+from itertools import permutations
+from pathlib import Path
 
-# CSVファイルからデータを読み込み、辞書に格納
-filename_mapping = {}
-with open('source_code_information.csv', 'r', newline='', encoding='utf-8') as csvfile:
-    csv_reader = csv.reader(csvfile)
-    next(csv_reader)  # ヘッダー行をスキップ
-    for row in csv_reader:
-        filename, code, police, prefecture = row
-        filename_mapping[filename] = {
-            'code': code, 'police': police, 'prefecture': prefecture}
+OPTION_RE = re.compile(r"<option\b([^>]*)>([^<]*)</option>", re.IGNORECASE)
+ATTR_RE = re.compile(r"""(\w+)\s*=\s*["']([^"']*)["']""")
 
-# 新しいCSVファイルにデータを書き込む
-with open('intersection_position.csv', 'w', newline='', encoding='utf-8') as csvfile:
-    csv_writer = csv.writer(csvfile)
 
-    # ヘッダー行を書き込む
-    header = ['value', 'lon', 'lat', '交差点番号', '情報源コード', '都道府県警察名', '都道府県']
-    csv_writer.writerow(header)
+def page_name(target_id: str) -> str:
+    body = target_id.lstrip("R")
+    parts = body.split("_")
+    return f"index10_{int(parts[0])}{'_' + parts[1] if len(parts) > 1 else ''}.html"
 
-    # ファイル名が index10_*.html の形式に一致するすべてのファイルを開く
-    for filepath in glob.glob("./HTML/index10_*.html"):
-        filename = os.path.basename(filepath)
-        with open(filepath, encoding='utf-8') as file:
-            html = file.read()
 
-            # HTMLを解析
-            soup = BeautifulSoup(html, 'html.parser')
+def pref_no(target_id: str) -> int:
+    return int(target_id.lstrip("R").split("_")[0])
 
-            # 辞書から情報源コード、都道府県警察名、都道府県を取得
-            info = filename_mapping.get(filename)
-            if info:
-                code = info['code']
-                police = info['police']
-                prefecture = info['prefecture']
-            else:
-                code = ''
-                police = ''
-                prefecture = ''
 
-            # optionタグを取得し、CSV形式に変換
-            for option in soup.find_all('option'):
-                value = option.get('value')
-                lon = option.get('lon')
-                lat = option.get('lat')
-                text = option.text
+def parse_page(path: Path) -> list[tuple[str, str, str]]:
+    """(交差点番号, lon, lat) のリスト。座標のない選択肢（先頭の「－」）は捨てる。"""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    out = []
+    for attrs_str, label in OPTION_RE.findall(text):
+        attrs = dict(ATTR_RE.findall(attrs_str))
+        lon, lat = attrs.get("lon"), attrs.get("lat")
+        number = label.strip()
+        if lon and lat and number:
+            out.append((number, lon, lat))
+    return out
 
-                if value and lon and lat:
-                    row = [value, lon, lat, text, code, police, prefecture]
-                    csv_writer.writerow(row)
 
-print('CSVファイルに情報を追加し、変換が完了しました。')
+def load_control_numbers(path: Path) -> dict[str, set]:
+    """情報源コード → 交差点番号の集合（制御情報側）。"""
+    numbers = defaultdict(set)
+    with path.open(encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            numbers[row["情報源コード"]].add(row["交差点番号"])
+    return numbers
+
+
+def best_assignment(pages: list[str], codes: list[str], page_nums: dict, code_nums: dict):
+    """ページと情報源コードの対応のうち、交差点番号の一致数が最大の組み合わせを返す。"""
+    best, best_score = None, -1
+    for perm in permutations(codes):
+        score = sum(len(page_nums[p] & code_nums.get(c, set())) for p, c in zip(pages, perm))
+        if score > best_score:
+            best, best_score = perm, score
+    return best, best_score
+
+
+def main() -> None:
+    p = argparse.ArgumentParser()
+    p.add_argument("--catalog", default="work/zip/catalog.json")
+    p.add_argument("--source-codes", default="work/source_codes.json")
+    p.add_argument("--average", default="work/national_average_cycle.csv")
+    p.add_argument("--html", default="work/html")
+    p.add_argument("--out", default="work")
+    args = p.parse_args()
+
+    entry = json.loads(Path(args.catalog).read_text(encoding="utf-8"))
+    zip_codes = json.loads(Path(args.source_codes).read_text(encoding="utf-8"))
+    code_nums = load_control_numbers(Path(args.average))
+    html_dir = Path(args.html)
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # 都道府県ごとに、ページと情報源コードをまとめる
+    groups: dict[int, dict[str, list]] = defaultdict(lambda: {"pages": [], "codes": []})
+    parsed: dict[str, list[tuple[str, str, str]]] = {}
+    warnings: list[str] = []
+
+    for target in entry["targetList"]:
+        name = page_name(target["id"])
+        path = html_dir / name
+        if not path.exists():
+            warnings.append(f"{name}: HTML未取得")
+            continue
+        codes = zip_codes.get(target["link"].split("/")[-1], [])
+        if len(codes) != 1:
+            warnings.append(f"{name}: 情報源コードが{len(codes)}件（{codes}）")
+            continue
+        parsed[name] = parse_page(path)
+        g = groups[pref_no(target["id"])]
+        g["pages"].append(name)
+        g["codes"].append(codes[0])
+
+    page_nums = {n: {x[0] for x in rows} for n, rows in parsed.items()}
+
+    rows_out: list[tuple[str, str, str, str]] = []
+    total_hit = total_ctrl = 0
+    for pref in sorted(groups):
+        pages, codes = groups[pref]["pages"], groups[pref]["codes"]
+        assign, score = best_assignment(pages, codes, page_nums, code_nums)
+        for name, code in zip(pages, assign):
+            hit = len(page_nums[name] & code_nums.get(code, set()))
+            ctrl = len(code_nums.get(code, set()))
+            total_hit += hit
+            total_ctrl += ctrl
+            mark = "" if hit == ctrl else f"  ←制御側{ctrl}件中{hit}件のみ一致"
+            print(f"  {name}  情報源コード={code}  位置{len(page_nums[name]):,}件{mark}", flush=True)
+            if hit == 0 and ctrl:
+                warnings.append(f"{name}↔{code}: 交差点番号が1件も一致しない")
+            for number, lon, lat in parsed[name]:
+                rows_out.append((code, number, lon, lat))
+
+    out_csv = out_dir / "intersection_position.csv"
+    with out_csv.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["情報源コード", "交差点番号", "lon", "lat"])
+        w.writerows(rows_out)
+
+    rate = total_hit / total_ctrl * 100 if total_ctrl else 0
+    print(f"完了: {out_csv}  {len(rows_out):,}件", file=sys.stderr)
+    print(f"  制御情報の交差点 {total_ctrl:,}箇所のうち {total_hit:,}箇所に位置あり（{rate:.1f}%）",
+          file=sys.stderr)
+    for w_ in warnings:
+        print(f"  警告: {w_}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

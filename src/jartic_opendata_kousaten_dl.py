@@ -1,49 +1,75 @@
 # -*- coding: utf-8 -*-
-import os
-import csv
+"""JARTIC がオープンデータとして公開している交差点制御情報（typeC）を一括ダウンロードする。
+
+配布URLは月次で変わる（.../opendata/{更新日時}/typeC_{都市名}_{年_月}.zip）ため、
+更新日時や対象年月を埋め込まず、公式のカタログ JSON から最新版を解決する。
+
+出力:
+  {out}/*.zip          ダウンロードした zip
+  {out}/catalog.json   採用した typeC エントリ（対象年月・公開日・ファイル一覧）
+
+使い方:
+  python3 src/jartic_opendata_kousaten_dl.py --out work/zip
+"""
+import argparse
 import json
-import datetime
-import time
-import configparser
-import requests
-import zipfile
-from io import StringIO
-import io
+import sys
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
-# 都道府県名（ローマ字）のリストを作成する
-PrefRomanlist = []
+CATALOG_URL = "https://www.jartic.or.jp/d/opendata/opendata.json"
+BASE_URL = "https://www.jartic.or.jp/d/opendata"
+UA = {"User-Agent": "Mozilla/5.0 (compatible; jartic-traffic-signal-cycle-converter)"}
 
-# csvファイルの読み込み
-with open('D:/交通データ/JARTIC/kousaten_PrefRoman.csv') as f:
-    # header = next(csv.reader(f))
-    for row in csv.reader(f):
-        s = row[0]
-        PrefRomanlist.append(s)
 
-# print(PrefRomanlist)
+def fetch_catalog(url: str = CATALOG_URL) -> dict:
+    """カタログJSONから交差点制御情報（typeC）のエントリを返す。"""
+    req = urllib.request.Request(url, headers=UA)
+    with urllib.request.urlopen(req, timeout=60) as r:
+        catalog = json.load(r)
+    for entry in catalog:
+        if entry.get("type") == "typeC":
+            return entry
+    raise SystemExit("カタログに typeC（交差点制御情報）が見つかりません")
 
-# 更新日・作成日を入力する
-UpdateDate = '202304030911'
-CreDate = '2023_02'
 
-# 出力フォルダパスを作成する
-OutFolderPath = 'D:/交通データ/JARTIC/03_交差点制御情報/'
+def download(target: dict, out_dir: Path) -> tuple[str, int]:
+    """1ファイルをダウンロードする。既に同サイズで存在すればスキップ。"""
+    url = BASE_URL + target["link"]
+    dest = out_dir / target["link"].split("/")[-1]
+    req = urllib.request.Request(url, headers=UA)
+    with urllib.request.urlopen(req, timeout=300) as r:
+        size = int(r.headers.get("Content-Length", 0))
+        if dest.exists() and dest.stat().st_size == size and size > 0:
+            return dest.name, 0
+        dest.write_bytes(r.read())
+    return dest.name, dest.stat().st_size
 
-# フォルダを作成する
-new_dir_path = OutFolderPath + UpdateDate
-os.mkdir(new_dir_path)
 
-# 都道府県名のリストでループ
-for PrefRoman in PrefRomanlist:
-    # URL指定
-    url = "https://www.jartic.or.jp/d/opendata/" + \
-        UpdateDate + "/typeC_" + PrefRoman + "_" + CreDate + ".zip"
-    # データをURLから取得する
-    r = requests.get(url, stream=True)
-    # zipファイルとして保存する
-    saveFile = new_dir_path + "/" + "typeC_" + PrefRoman + "_" + CreDate + ".zip"
-    with open(saveFile, 'wb') as f:
-        f.write(r.content)
-        print(PrefRoman)
+def main() -> None:
+    p = argparse.ArgumentParser()
+    p.add_argument("--out", default="work/zip", help="zip の出力先")
+    p.add_argument("--workers", type=int, default=4, help="並列ダウンロード数")
+    args = p.parse_args()
 
-print(u'処理終了')
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    entry = fetch_catalog()
+    print(f"交差点制御情報 対象={entry['targetMonth']} 公開={entry['releaseDay']} "
+          f"{len(entry['targetList'])}ファイル")
+    (out_dir / "catalog.json").write_text(
+        json.dumps(entry, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    total = 0
+    with ThreadPoolExecutor(args.workers) as ex:
+        for name, size in ex.map(lambda t: download(t, out_dir), entry["targetList"]):
+            total += size
+            print(f"  {name}  {'スキップ（取得済）' if size == 0 else f'{size/1e6:.1f} MB'}",
+                  flush=True)
+    print(f"完了: {out_dir}  新規取得 {total/1e6:.0f} MB", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

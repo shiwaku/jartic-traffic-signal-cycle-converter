@@ -8,6 +8,7 @@ __pycache__/
 venv/
 env/
 
-# 中間生成物（交差点制御情報の展開ファイル・作業用CSV）
+# 中間生成物（ダウンロードしたzip・展開したCSV・GeoJSON）
+work/
 *.7z
 *.zip

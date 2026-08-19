@@ -44,7 +44,7 @@ export const LAYERS: LayerDef[] = [
     sourceLayer: 'signal_cycle',
     on: true,
     defaultOpacity: 1,
-    desc: 'JARTIC の交差点制御情報（2023年2月）から時間帯別に算出した、信号交差点1か所あたりの平均サイクル長（秒）。サイクル長は青・黄・赤が一巡する周期の長さで、交通量の多い交差点ほど長くなる傾向がある。',
+    desc: 'JARTIC の交差点制御情報（2026年6月）から時間帯別に算出した、信号交差点1か所あたりの平均サイクル長（秒）。サイクル長は青・黄・赤が一巡する周期の長さで、交通量の多い交差点ほど長くなる傾向がある。',
     attribution:
       '<a href="https://www.jartic.or.jp/" target="_blank" rel="noopener">日本道路交通情報センター[JARTIC] 交差点制御情報</a> | <a href="https://www.tmt.or.jp/research/index10.html" target="_blank" rel="noopener">日本交通管理技術協会 交差点位置情報</a>',
   },
