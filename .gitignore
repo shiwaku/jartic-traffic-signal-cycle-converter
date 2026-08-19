@@ -1,0 +1,13 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# 中間生成物（交差点制御情報の展開ファイル・作業用CSV）
+*.7z
+*.zip
