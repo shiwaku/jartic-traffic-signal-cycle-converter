@@ -95,22 +95,17 @@ tippecanoe -o work/signal_cycle.pmtiles -l signal_cycle -Z0 -z14 -r1 \
 
 ### 生データのアーカイブ
 
-**JARTIC は最新1か月分しか配布していません**。過去月の配布URLは消えるため（実測で404）、生データは公開ウィンドウ内に取得しないと復旧できません。そのため update-data は**品質ゲートより先に**生zipを private リポジトリの Release（`raw-YYYYMM`）へ退避します。ゲートに落ちても生データは残ります。
+**JARTIC は最新1か月分しか配布していません**。過去月の配布URLは消えるため（実測で404）、生データは公開ウィンドウ内に取得しないと復旧できません。そのため update-data は**品質ゲートより先に**生zipを `raw-YYYYMM` の [Release](../../releases) へ退避します。ゲートに落ちても生データは残ります。
 
-手元へは、退避先から好きなタイミングで取り込めます（Release は消えないので締切はありません）。
+退避先は同じリポジトリなので、`GITHUB_TOKEN` だけで動きます。追加のトークンやシークレットは不要です。
+
+手元へは、好きなタイミングで取り込めます（Release は消えないので締切はありません）。
 
 ```bash
-python3 src/mirror_archive.py --raw-repo <owner>/<private-repo>
+python3 src/mirror_archive.py
 # 既定の保存先は ../jartic-archive/{年月}/（環境変数 JARTIC_ARCHIVE_DIR で変更可）
+# 生zip・成果物を月ごとに置き、SHA256 マニフェストを添える
 ```
-
-退避を有効にするには、あらかじめ次を設定します。
-
-1. 生データ用の **private リポジトリ**を作る（空だと Release を作れないので README などを1つコミットしておく）
-2. そのリポジトリの `contents: write` を持つ fine-grained PAT を発行する
-3. 本リポジトリに変数 `RAW_ARCHIVE_REPO`（例 `owner/jartic-raw-archive`）とシークレット `RAW_ARCHIVE_TOKEN` を登録する
-
-未設定のまま update-data が動くと、生データを取り逃さないようアーカイブ段階で停止します。
 
 ### 各スクリプトの役割
 

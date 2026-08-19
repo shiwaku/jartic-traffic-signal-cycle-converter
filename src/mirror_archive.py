@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """Release に退避してある月次データを、ローカルのアーカイブへミラーする。
 
-JARTIC は最新1か月分しか配布しないため、生zipは取得した月のうちに private リポジトリの
-Release へ退避している（update-data ワークフロー）。このスクリプトはそこから未取得の月を
-落としてきて、月ごとのディレクトリに並べる。Release 側は消えないので、実行が遅れても
-取りこぼさない。
+JARTIC は最新1か月分しか配布しないため、生zipは取得した月のうちに `raw-YYYYMM` の Release へ
+退避している（update-data ワークフロー）。このスクリプトはそこから未取得の月を落としてきて、
+月ごとのディレクトリに並べる。Release 側は消えないので、実行が遅れても取りこぼさない。
 
   {dest}/{年月}/zip/typeC_*.zip     生データ（JARTICの配布zipそのまま）
   {dest}/{年月}/catalog.json        取得時のカタログ
@@ -14,8 +13,8 @@ Release へ退避している（update-data ワークフロー）。このスク
 gh コマンドの認証が必要（gh auth login 済みであること）。
 
 使い方:
-  python3 src/mirror_archive.py --raw-repo shiwaku/jartic-raw-archive
-  python3 src/mirror_archive.py --raw-repo … --month 202606 --recheck
+  python3 src/mirror_archive.py
+  python3 src/mirror_archive.py --month 202606 --recheck
 """
 import argparse
 import hashlib
@@ -27,6 +26,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DEST = os.environ.get("JARTIC_ARCHIVE_DIR") or str(ROOT.parent / "jartic-archive")
+DEFAULT_REPO = "shiwaku/jartic-traffic-signal-cycle-converter"
 
 
 def gh(args: list, capture: bool = True) -> str:
@@ -87,9 +87,9 @@ def mirror_month(month: str, dest: Path, raw_repo: str, data_repo: str, recheck:
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--raw-repo", required=True, help="生zipを退避してある private リポジトリ")
-    p.add_argument("--data-repo", default="shiwaku/jartic-traffic-signal-cycle-converter",
-                   help="成果物の Release があるリポジトリ（空文字で省略）")
+    p.add_argument("--raw-repo", default=DEFAULT_REPO, help="生zip（raw-YYYYMM）の Release があるリポジトリ")
+    p.add_argument("--data-repo", default=DEFAULT_REPO,
+                   help="成果物（data-YYYYMM）の Release があるリポジトリ（空文字で省略）")
     p.add_argument("--dest", default=DEFAULT_DEST, help=f"保存先（既定 {DEFAULT_DEST}）")
     p.add_argument("--month", default="", help="特定の年月だけ（既定は未取得のすべて）")
     p.add_argument("--recheck", action="store_true", help="取得済みの月も落とし直して検証する")

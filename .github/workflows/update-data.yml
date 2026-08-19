@@ -4,6 +4,7 @@ name: update-data
 #
 # JARTIC は最新1か月分しか配布せず、過去月のURLは消える（実測で404）。取り逃すと復旧できない
 # ため、**生zipのアーカイブは品質ゲートより先**に済ませる。ゲートに落ちても生データは残る。
+# 退避先は同じリポジトリの raw-YYYYMM Release。GITHUB_TOKEN で書けるので追加の認証情報は要らない。
 #
 # 公開日は対象月の約2か月後の1日だが遅れることがあるので、日付では判断せず日次でカタログの
 # 対象年月を見る。差分が無ければ数秒で終わる。
@@ -58,7 +59,6 @@ jobs:
     timeout-minutes: 60
     env:
       TARGET_MONTH: ${{ needs.check.outputs.target_month }}
-      RAW_ARCHIVE_REPO: ${{ vars.RAW_ARCHIVE_REPO }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -93,25 +93,20 @@ jobs:
       - name: Download raw data
         run: python3 src/jartic_opendata_kousaten_dl.py --out work/zip
 
-      - name: Archive raw data to private repository
+      - name: Archive raw data
         if: ${{ !inputs.skip_archive }}
         env:
-          GH_TOKEN: ${{ secrets.RAW_ARCHIVE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [ -z "${RAW_ARCHIVE_REPO:-}" ] || [ -z "${GH_TOKEN:-}" ]; then
-            echo "::error::生zipの退避先が未設定です。リポジトリ変数 RAW_ARCHIVE_REPO と" \
-                 "シークレット RAW_ARCHIVE_TOKEN を設定してください（README「生データのアーカイブ」参照）"
-            exit 1
-          fi
           tag="raw-${TARGET_MONTH}"
-          if ! gh release view "$tag" --repo "$RAW_ARCHIVE_REPO" >/dev/null 2>&1; then
-            gh release create "$tag" --repo "$RAW_ARCHIVE_REPO" \
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" \
               --title "交差点制御情報 ${TARGET_MONTH}（生データ）" \
               --notes "JARTIC 交差点制御情報 typeC の配布zipそのまま。対象年月 ${TARGET_MONTH}、公開日 ${{ needs.check.outputs.release_day }}。JARTIC は最新1か月分しか配布しないため退避したもの。"
           fi
-          gh release upload "$tag" --repo "$RAW_ARCHIVE_REPO" --clobber work/zip/*.zip work/zip/catalog.json
-          echo "退避: $RAW_ARCHIVE_REPO $tag（$(ls work/zip/*.zip | wc -l) ファイル）"
+          gh release upload "$tag" --clobber work/zip/*.zip work/zip/catalog.json
+          echo "退避: $tag（$(ls work/zip/*.zip | wc -l) ファイル）"
 
       # --- ここから公開判断 ---
 
