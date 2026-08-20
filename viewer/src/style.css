@@ -555,6 +555,22 @@ body {
   font-size: 10px;
 }
 
+/* MapLibre 標準アイコンは fill='#333' 固定のため、ダークテーマだと
+   暗い背景に埋もれて「黒く塗りつぶされた四角」に見える。
+   反転してから色相を戻し、現在地アイコン等の色味も保つ。 */
+:root[data-theme='dark'] .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* ボタン間の区切り線（既定は #ddd）とホバーもテーマに合わせる */
+:root[data-theme='dark'] .maplibregl-ctrl-group button + button {
+  border-top-color: var(--line-2);
+}
+
+:root[data-theme='dark'] .maplibregl-ctrl-group button:not(:disabled):hover {
+  background-color: var(--hover);
+}
+
 /* ---- レスポンシブ（モバイルはボトムシート） ---- */
 @media (max-width: 640px) {
   .panel {
