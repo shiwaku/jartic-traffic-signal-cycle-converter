@@ -4,12 +4,19 @@
 結合キーは (情報源コード, 交差点番号)。交差点番号は情報源コードごとの連番なので、
 情報源コードを含めないと別県の交差点と衝突する。
 
-GeoJSON は1行1フィーチャの行区切り形式（.geojsonl）で書く。全国・24時間分で
-100万件を超えるため、tippecanoe が並列読み込みできる形式にしておく。
+GeoJSON は**1交差点1フィーチャ**で書き、24時間帯の値を属性 c0〜c23 に持たせる。
+時間帯ごとに別フィーチャにすると同じ座標が24回並び、tippecanoe が低ズームでそれを
+「密な重複」と見て 23/24 を落とす（実測: ズーム6以下では 00:00 のときしか点が残らない）。
+1フィーチャにまとめると全点が全ズームに残り、タイルも 13.8MB → 5.0MB に縮む。
+
+属性名は式から扱いやすいよう ASCII に短縮する（src / no / c0〜c23）。年月は全レコードで
+同一なのでフィーチャには持たせず、dataset.json 側に持つ。1か月平均に 0.1 秒の意味は
+無いので整数秒に丸める。最小・最大・平均といった派生値は 24 個の値から即座に計算できる
+ため、タイルには入れない（5つ足すとタイルが 0.7MB 増える）。
 
 出力:
   {out}/signal_cycle.csv       情報源コード,交差点番号,年月,時間帯,平均サイクル長,lon,lat
-  {out}/signal_cycle.geojsonl  同内容の行区切りGeoJSON
+  {out}/signal_cycle.geojsonl  1交差点1フィーチャの行区切りGeoJSON（src,no,c0〜c23）
 
 使い方:
   python3 src/csvfile-add-latlon.py --average work/national_average_cycle.csv \
@@ -51,10 +58,11 @@ def main() -> None:
     matched = 0
     missing_keys: set[tuple[str, str]] = set()
     total = 0
+    # 交差点ごとに24時間分をまとめる。全国 10,543 箇所 × 24 値なので素直に持てる。
+    by_intersection: dict[tuple[str, str], dict[int, int]] = {}
 
     with Path(args.average).open(encoding="utf-8") as fin, \
-            out_csv.open("w", newline="", encoding="utf-8") as fcsv, \
-            out_geojsonl.open("w", encoding="utf-8") as fgeo:
+            out_csv.open("w", newline="", encoding="utf-8") as fcsv:
         reader = csv.DictReader(fin)
         writer = csv.writer(fcsv)
         writer.writerow(["情報源コード", "交差点番号", "年月", "時間帯", "平均サイクル長", "lon", "lat"])
@@ -66,32 +74,40 @@ def main() -> None:
                 missing_keys.add(key)
                 continue
             lon, lat = lonlat
-            cycle = float(row["平均サイクル長"])
             writer.writerow([row["情報源コード"], row["交差点番号"], row["年月"],
                              row["時間帯"], row["平均サイクル長"], lon, lat])
-            feature = {
-                "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [float(lon), float(lat)]},
-                "properties": {
-                    "情報源コード": row["情報源コード"],
-                    "交差点番号": row["交差点番号"],
-                    "年月": row["年月"],
-                    "時間帯": row["時間帯"],
-                    "平均サイクル長": cycle,
-                },
-            }
-            fgeo.write(json.dumps(feature, ensure_ascii=False) + "\n")
+            hour = int(row["時間帯"][:2])
+            by_intersection.setdefault(key, {})[hour] = round(float(row["平均サイクル長"]))
             matched += 1
+
+    write_geojsonl(out_geojsonl, by_intersection, positions)
 
     rate = matched / total * 100 if total else 0
     print(f"完了: {out_csv} / {out_geojsonl}", file=sys.stderr)
-    print(f"  結合 {matched:,} / {total:,} 行（{rate:.1f}%）", file=sys.stderr)
+    print(f"  結合 {matched:,} / {total:,} 行（{rate:.1f}%）"
+          f" → {len(by_intersection):,} フィーチャ", file=sys.stderr)
     if missing_keys:
         sample = sorted(missing_keys)[:10]
         print(f"  位置情報が無い交差点: {len(missing_keys):,}箇所  例: {sample}", file=sys.stderr)
 
     # 結合率はデータ品質の指標なので、成果物として残して更新のたびに差分を追えるようにする。
     write_report(Path(args.report), Path(args.average), positions, missing_keys, matched, total)
+
+
+def write_geojsonl(path: Path, by_intersection: dict, positions: dict) -> None:
+    """1交差点1フィーチャの行区切りGeoJSONを書く。欠測の時間帯はキーごと省く。"""
+    with path.open("w", encoding="utf-8") as f:
+        for (code, number), hours in by_intersection.items():
+            lon, lat = positions[(code, number)]
+            props: dict[str, object] = {"src": code, "no": number}
+            for hour in sorted(hours):
+                props[f"c{hour}"] = hours[hour]
+            feature = {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [float(lon), float(lat)]},
+                "properties": props,
+            }
+            f.write(json.dumps(feature, ensure_ascii=False) + "\n")
 
 
 def write_report(path: Path, average_path: Path, positions: dict,

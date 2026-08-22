@@ -382,6 +382,37 @@ body {
   border-color: transparent;
 }
 
+/* 連続量（サイクル長）はグラデーションバーで示す。段階リストだと段の境目に意味がある
+   ように見えてしまう。 */
+.lg-bar {
+  height: 10px;
+  border-radius: 5px;
+  border: 1px solid var(--line-2);
+}
+
+.lg-ticks {
+  position: relative;
+  height: 14px;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.lg-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.lg-tick:first-child {
+  transform: none;
+}
+
+.lg-tick:last-child {
+  transform: translateX(-100%);
+}
+
 /* ---- レイヤー不透明度スライダー ---- */
 .layer-opacity {
   display: flex;
@@ -467,6 +498,43 @@ body {
   font-size: 12px;
   color: var(--ink-2);
   margin-top: 1px;
+}
+
+/* 24時間の推移。1交差点1フィーチャにしたことで、クリックした地点の1日分がその場に揃う。 */
+.pp-spark {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 10px 0 0;
+  overflow: visible;
+}
+
+.spark-line {
+  fill: none;
+  stroke: var(--ink-3);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.spark-guide {
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+  opacity: 0.7;
+}
+
+.spark-now {
+  stroke: var(--surface-solid);
+  stroke-width: 1.5;
+}
+
+.pp-spark-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
 }
 
 .pp-dl {

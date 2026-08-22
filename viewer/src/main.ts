@@ -6,13 +6,12 @@ import { getBasemapStyle, type Basemap } from './basemap'
 import {
   LAYERS,
   type LayerDef,
-  hourFilter,
-  hourFilteredLayerIds,
+  type PaintContext,
   layerIdsOf,
   layerSpecs,
   legendFor,
   opacityOf,
-  opacityUpdates,
+  paintUpdates,
   pickLayerIdOf,
   popupHtml,
 } from './layers'
@@ -27,6 +26,9 @@ let theme: Theme = initialTheme()
 let base: Basemap = 'pale'
 let hour = 0
 applyThemeAttr(theme)
+
+/** 現在の描画コンテキスト。レイヤーの色と不透明度はこれだけで決まる。 */
+const ctx = (): PaintContext => ({ hour, theme })
 
 const isMobile = window.matchMedia('(max-width: 640px)').matches
 const DEBUG = new URLSearchParams(location.search).has('debug')
@@ -143,11 +145,10 @@ function ensureLayer(def: LayerDef): void {
     })
   }
   const before = beforeIdFor(def)
-  for (const spec of layerSpecs(def)) {
+  for (const spec of layerSpecs(def, ctx())) {
     if (map.getLayer(spec.id)) continue
     map.addLayer(spec, before)
   }
-  applyHourFilter()
 }
 
 function removeLayer(def: LayerDef): void {
@@ -169,10 +170,17 @@ function addDataLayers(): void {
 
 // ---- 時間帯 ----
 
-function applyHourFilter(): void {
-  const filter = hourFilter(hour)
-  for (const id of hourFilteredLayerIds()) {
-    if (map.getLayer(id)) map.setFilter(id, filter)
+/**
+ * 現在の時間帯・テーマ・不透明度を地図に反映する。
+ * 1交差点1フィーチャに24時間分の値を持たせているので、時間帯の切替は「どの属性を見るか」を
+ * paint 式の中で変えるだけで済む。setFilter と違いタイルの再評価が走らない。
+ */
+function applyPaint(): void {
+  for (const def of LAYERS) {
+    if (!def.on) continue
+    for (const u of paintUpdates(def, ctx())) {
+      if (map.getLayer(u.id)) map.setPaintProperty(u.id, u.prop, u.value)
+    }
   }
 }
 
@@ -183,7 +191,7 @@ function setHour(next: number): void {
   hour = ((next % 24) + 24) % 24
   hourSlider.value = String(hour)
   hourLabel.textContent = `${hour}時`
-  applyHourFilter()
+  applyPaint()
 }
 
 hourSlider.addEventListener('input', () => setHour(Number(hourSlider.value)))
@@ -221,6 +229,7 @@ themeBtn.addEventListener('click', () => {
   theme = theme === 'dark' ? 'light' : 'dark'
   applyThemeAttr(theme)
   renderThemeBtn()
+  refreshLegends()
   reloadStyle()
 })
 
@@ -239,12 +248,27 @@ collapseBtn.addEventListener('click', () => {
 const layersDiv = document.getElementById('layers') as HTMLElement
 
 function legendMarkup(def: LayerDef): string {
-  return legendFor(def)
-    .map(
-      (it) =>
-        `<span class="lg-row"><span class="lg-sw lg-${it.shape}" style="background:${it.color}"></span>${it.label}</span>`,
-    )
+  const legend = legendFor(def, ctx())
+  if (legend.kind === 'items') {
+    return legend.items
+      .map(
+        (it) =>
+          `<span class="lg-row"><span class="lg-sw lg-${it.shape}" style="background:${it.color}"></span>${it.label}</span>`,
+      )
+      .join('')
+  }
+  const ticks = legend.ticks
+    .map((t) => `<span class="lg-tick" style="left:${t.pos}%">${t.label}</span>`)
     .join('')
+  return `<div class="lg-bar" style="background:${legend.css}"></div><div class="lg-ticks">${ticks}</div>`
+}
+
+/** テーマを変えると配色が変わるので、凡例も描き直す。 */
+function refreshLegends(): void {
+  for (const def of LAYERS) {
+    const el = layersDiv.querySelector<HTMLElement>(`.layer-item[data-key="${def.key}"] .layer-legend`)
+    if (el) el.innerHTML = legendMarkup(def)
+  }
 }
 
 function buildToggles(): void {
@@ -332,7 +356,7 @@ function setLayerVisible(def: LayerDef, on: boolean): void {
 
 function setLayerOpacity(def: LayerDef, v: number): void {
   def.opacity = v
-  for (const u of opacityUpdates(def, v)) {
+  for (const u of paintUpdates(def, ctx())) {
     if (map.getLayer(u.id)) map.setPaintProperty(u.id, u.prop, u.value)
   }
 }
@@ -419,7 +443,7 @@ map.on('click', (e) => {
   setHighlight(f)
   const p = new maplibregl.Popup({ closeButton: true, maxWidth: '320px' })
     .setLngLat(e.lngLat)
-    .setHTML(popupHtml(def, f.properties as Record<string, unknown>, e.lngLat.lng, e.lngLat.lat))
+    .setHTML(popupHtml(def, f.properties as Record<string, unknown>, e.lngLat.lng, e.lngLat.lat, ctx()))
     .addTo(map)
   // × ボタンや地図クリックで閉じたときはハイライトも解除
   p.on('close', () => {

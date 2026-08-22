@@ -228,8 +228,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         "--out", str(work), "--report", str(new_report_path)],
        "5/6 座標の付与とレポート出力")
 
+    # z13 の座標精度は約1.2mで交差点の位置には十分。z14 にすると 5.7MB → 7.0MB になるが
+    # 見え方は変わらない。--drop-densest-as-needed は 1交差点1フィーチャなら実質発動
+    # しないが、将来交差点が増えたときの保険として残す。
     new_pmtiles = work / "signal_cycle.pmtiles"
-    sh([tippecanoe, "-o", str(new_pmtiles), "-l", "signal_cycle", "-Z0", "-z14", "-r1",
+    sh([tippecanoe, "-o", str(new_pmtiles), "-l", "signal_cycle", "-Z0", "-z13", "-r1",
         "--drop-densest-as-needed", "--force", "-P", str(work / "signal_cycle.geojsonl")],
        "6/6 PMTiles の生成")
 

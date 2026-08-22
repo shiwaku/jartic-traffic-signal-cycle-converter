@@ -69,12 +69,12 @@ python3 src/intersection_position_getHTML.py --catalog work/zip/catalog.json --o
 python3 src/HTMLtoCSV.py --catalog work/zip/catalog.json --source-codes work/source_codes.json \
     --average work/national_average_cycle.csv --html work/html --out work
 
-# 5. 平均サイクル長に座標を付与し、GeoJSON と結合レポートを出力
+# 5. 平均サイクル長に座標を付与し、GeoJSON と結合レポートを出力（1交差点1フィーチャ）
 python3 src/csvfile-add-latlon.py --average work/national_average_cycle.csv \
     --position work/intersection_position.csv --out work --report work/join_report.json
 
 # 6. PMTiles を生成
-tippecanoe -o work/signal_cycle.pmtiles -l signal_cycle -Z0 -z14 -r1 \
+tippecanoe -o work/signal_cycle.pmtiles -l signal_cycle -Z0 -z13 -r1 \
     --drop-densest-as-needed --force -P work/signal_cycle.geojsonl
 ```
 
@@ -115,7 +115,7 @@ python3 src/mirror_archive.py
 | `src/calc_average_cycle.py` | 制御CSVをストリーム処理し、`(情報源コード, 交差点番号, 年月, 時間帯)` ごとの平均サイクル長を算出 |
 | `src/intersection_position_getHTML.py` | 日本交通管理技術協会の交差点位置情報ページを取得 |
 | `src/HTMLtoCSV.py` | HTMLの `<option>` から交差点番号と座標を抽出。ページと情報源コードの対応は交差点番号の一致数で検証して決定 |
-| `src/csvfile-add-latlon.py` | 平均サイクル長に座標を結合し、CSV / 行区切りGeoJSON / 結合レポートを出力 |
+| `src/csvfile-add-latlon.py` | 平均サイクル長に座標を結合し、CSV / 行区切りGeoJSON / 結合レポートを出力。GeoJSON は1交差点1フィーチャで、24時間分を属性 `c0`〜`c23` に持たせる |
 | `src/run_pipeline.py` | 上記を1コマンドで通し、品質ゲートを通ったものだけを `data/` に反映 |
 | `src/update_docs.py` | `dataset.json` から README の収録データ節を生成 |
 | `src/mirror_archive.py` | Release に退避した生データをローカルへミラー |
@@ -123,6 +123,7 @@ python3 src/mirror_archive.py
 ### データ構造上の注意
 - **交差点名は交差点制御情報に含まれません**。制御CSV（時刻・情報源コード・交差点番号・サイクル長・スプリット＃1〜6・リンクバージョン）にも定義CSV（150列）にも名称の列は存在せず、交差点はコードでのみ識別されます。
 - **交差点番号は情報源コードごとの連番**です。単独では一意にならないため、必ず `情報源コード + 交差点番号` を結合キーにします。
+- **タイルは1交差点1フィーチャ**で、24時間分の平均サイクル長を属性 `c0`〜`c23`（整数秒）に持たせています。時間帯ごとに別フィーチャにすると同じ座標が24回並び、tippecanoe が低ズームでそれを「密な重複」と見て 23/24 を落とすため、**ズーム6以下では0時のデータしか残りませんでした**。1フィーチャにまとめたことで全ズームで全時間帯が引け、タイルも 13.8MB から 5.0MB に縮んでいます。ビューワ側も `setFilter` ではなく paint 式の差し替えで時間帯を切り替えます。
 - 交差点位置情報ページの `<option value="...">` は全国通しの連番で、**交差点番号はタグのテキスト**です（例: 函館は `value=263` / テキスト `1`）。
 - **情報源コードと都道府県の対応は、カタログの並び順から推測できません**。実測で `3010` は埼玉、`3011` は千葉であり、カタログの掲載順（15番目が埼玉）とは一致しません。対応は zip の中身から得た情報源コードで求め、[`data/source_names.json`](data/source_names.json) に記録しています。
 - **スプリットは百分率**です。秒に直すには `サイクル長 × スプリット% ÷ 100` とします。ただし各現示の時間は青・黄・全赤を合わせた長さで、その内訳はデータに含まれません。
