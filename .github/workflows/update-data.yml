@@ -49,10 +49,22 @@ jobs:
         with:
           python-version: "3.11"
       - id: check
-        run: python3 src/run_pipeline.py check
+        run: python3 src/pipeline.py check
+
+  test:
+    needs: check
+    if: needs.check.outputs.updated == 'true' || inputs.force
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python3 -m unittest discover -s tests -v
 
   update:
-    needs: check
+    needs: [check, test]
     if: needs.check.outputs.updated == 'true' || inputs.force
     runs-on: ubuntu-latest
     # 実測で全体20分程度。外部サイトが応答しなくなったときに走り続けないよう上限を置く。
@@ -91,7 +103,7 @@ jobs:
       # --- ここから先、生データの保全を最優先で行う ---
 
       - name: Download raw data
-        run: python3 src/jartic_opendata_kousaten_dl.py --out work/zip
+        run: python3 src/pipeline.py fetch
 
       - name: Archive raw data
         if: ${{ !inputs.skip_archive }}
@@ -114,7 +126,7 @@ jobs:
         id: pipeline
         run: |
           set -o pipefail
-          python3 src/run_pipeline.py run --work work --skip-download \
+          python3 src/pipeline.py run --from cycle \
             ${{ inputs.force && '--force' || '' }} 2>&1 | tee work/pipeline.log
           status=${PIPESTATUS[0]}
           echo "status=$status" >> "$GITHUB_OUTPUT"
@@ -152,7 +164,7 @@ jobs:
               --notes-file work/release_notes.md
           fi
           gh release upload "$tag" --clobber \
-            work/signal_cycle.pmtiles data/join_report.json data/dataset.json
+            work/signal_cycle.pmtiles data/join_report.json data/dataset.json data/hourly_stats.json
           cat work/release_notes.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Commit metadata
@@ -164,7 +176,7 @@ jobs:
           if [ -f data/signal_cycle.pmtiles ]; then
             git rm --quiet data/signal_cycle.pmtiles
           fi
-          git add data/dataset.json data/join_report.json data/source_names.json README.md
+          git add data/dataset.json data/join_report.json data/hourly_stats.json data/source_names.json README.md
           if git diff --cached --quiet; then
             echo "変更なし"
             exit 0

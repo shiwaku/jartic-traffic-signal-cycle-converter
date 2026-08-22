@@ -49,49 +49,57 @@ https://shiwaku.github.io/jartic-traffic-signal-cycle-converter/
 ### 手元で実行する
 
 ```bash
-python3 src/run_pipeline.py check      # 新しい月が出ているかだけ見る
-python3 src/run_pipeline.py run        # 取得から PMTiles 生成まで通す（約20分・500MBのダウンロード）
+python3 src/pipeline.py check      # 新しい月が出ているかだけ見る
+python3 src/pipeline.py run        # 取得から PMTiles 生成まで通す（約20分・500MBのダウンロード）
 ```
 
-`run` は品質ゲートを通ったときだけ `data/` を書き換えます。個別に実行したい場合は次のとおりです。
+`run` は品質ゲートを通ったときだけ `data/` を書き換えます。段階は6つあり、途中で失敗しても `--from` で流し直せます。前段の成果物は `work/` の既存分を使うので、500MB の再取得は要りません。
 
 ```bash
-# 1. 交差点制御情報（typeC）を一括ダウンロード（51ファイル・約500MB）
-python3 src/jartic_opendata_kousaten_dl.py --out work/zip
+python3 src/pipeline.py run --from join    # 結合以降だけやり直す
+```
 
-# 2. 時間帯別の平均サイクル長を算出（zipを展開せずストリーム処理）
-python3 src/calc_average_cycle.py --zip-dir work/zip --out work
+段階を単独で実行することもできます。
 
-# 3. 交差点位置情報のHTMLを取得（51ページ）
-python3 src/intersection_position_getHTML.py --catalog work/zip/catalog.json --out work/html
-
-# 4. HTMLから交差点番号と座標を抽出
-python3 src/HTMLtoCSV.py --catalog work/zip/catalog.json --source-codes work/source_codes.json \
-    --average work/national_average_cycle.csv --html work/html --out work
-
-# 5. 平均サイクル長に座標を付与し、GeoJSON と結合レポートを出力（1交差点1フィーチャ）
-python3 src/csvfile-add-latlon.py --average work/national_average_cycle.csv \
-    --position work/intersection_position.csv --out work --report work/join_report.json
-
-# 6. PMTiles を生成
-tippecanoe -o work/signal_cycle.pmtiles -l signal_cycle -Z0 -z13 -r1 \
-    --drop-densest-as-needed --force -P work/signal_cycle.geojsonl
+```bash
+python3 src/pipeline.py fetch      # 1. 交差点制御情報（typeC）を一括ダウンロード（51ファイル・約500MB）
+python3 src/pipeline.py cycle      # 2. 時間帯別の平均サイクル長を算出（zipを展開せずストリーム処理）
+python3 src/pipeline.py html       # 3. 交差点位置情報のHTMLを取得（51ページ）
+python3 src/pipeline.py position   # 4. HTMLから交差点番号と座標を抽出
+python3 src/pipeline.py join       # 5. 座標を付与して GeoJSON・結合レポート・時間帯別統計を出力
+python3 src/pipeline.py tiles      # 6. PMTiles を生成
+python3 src/pipeline.py docs       # dataset.json から README の収録データ節を生成
 ```
 
 依存は Python 3.9+ 標準ライブラリと [tippecanoe](https://github.com/felt/tippecanoe) のみです。中間ファイルは `work/` に出力され、リポジトリには含まれません。
+
+### テスト
+
+判定や解析のロジックは標準ライブラリの `unittest` で確かめています（追加の依存はありません）。データ更新のワークフローも、取り込みの前にこれを通します。
+
+```bash
+python3 -m unittest discover -s tests
+```
 
 ### 品質ゲート
 
 人のレビューを挟まずに公開するため、前回の結果と比べて次のいずれかに当たると公開を止め、Issue を立てます。
 
-| 判定 | 内容 |
-|---|---|
-| 対象年月 | 前回より新しくない |
-| 交差点数 | 前回比 −5% 超 |
-| 行の結合率 | 前回比 −2pt 超 |
-| 情報源コード | 位置情報が1件も結合できないコードがある |
+前回と比べて劣化していないかを見る判定と、値としてそもそも妥当かを見る判定があります。前者は初回（前回データが無いとき）には効かないので、後者を併せて置いています。
 
-しきい値は `src/run_pipeline.py run --max-intersection-drop / --max-join-rate-drop` で変えられます。
+| 判定 | 内容 | 種別 |
+|---|---|---|
+| 対象年月 | 前回より新しくない | 前回比 |
+| 交差点数 | 前回比 −5% 超 | 前回比 |
+| 行の結合率 | 前回比 −2pt 超 | 前回比 |
+| サイクル長の中央値 | 前回比 ±10秒 超 | 前回比 |
+| PMTiles のサイズ | 前回比 ±50% 超 | 前回比 |
+| 値域 | 30〜400秒を外れるレコードが 0.1% 超 | 絶対値 |
+| 時間帯の網羅 | 24時間帯が揃わない交差点が 1% 超 | 絶対値 |
+| 座標の範囲 | 日本の範囲（122〜154E, 20〜46N）の外にある点がある | 絶対値 |
+| 情報源コード | 位置情報が1件も結合できないコードがある | 絶対値 |
+
+しきい値は `python3 src/pipeline.py run --max-intersection-drop / --max-join-rate-drop / --max-median-shift / --max-tile-size-shift` で変えられます。判定は [`src/jartic_signal/gate.py`](src/jartic_signal/gate.py) の純関数で、[`tests/test_gate.py`](tests/test_gate.py) が境目を押さえています。
 
 ### 生データのアーカイブ
 
@@ -107,18 +115,25 @@ python3 src/mirror_archive.py
 # 生zip・成果物を月ごとに置き、SHA256 マニフェストを添える
 ```
 
-### 各スクリプトの役割
+### モジュールの役割
 
-| スクリプト | 役割 |
+`src/pipeline.py` が入口で、中身は `src/jartic_signal/` にあります。段階ごとにモジュールを分け、受け渡しは `paths.py` が持つパスだけを使います。
+
+| モジュール | 役割 |
 |---|---|
-| `src/jartic_opendata_kousaten_dl.py` | カタログJSONから最新の交差点制御情報を解決して一括ダウンロード |
-| `src/calc_average_cycle.py` | 制御CSVをストリーム処理し、`(情報源コード, 交差点番号, 年月, 時間帯)` ごとの平均サイクル長を算出 |
-| `src/intersection_position_getHTML.py` | 日本交通管理技術協会の交差点位置情報ページを取得 |
-| `src/HTMLtoCSV.py` | HTMLの `<option>` から交差点番号と座標を抽出。ページと情報源コードの対応は交差点番号の一致数で検証して決定 |
-| `src/csvfile-add-latlon.py` | 平均サイクル長に座標を結合し、CSV / 行区切りGeoJSON / 結合レポート / 時間帯別統計を出力。GeoJSON は1交差点1フィーチャで、24時間分を属性 `c0`〜`c23` に持たせる |
-| `src/run_pipeline.py` | 上記を1コマンドで通し、品質ゲートを通ったものだけを `data/` に反映 |
-| `src/update_docs.py` | `dataset.json` から README の収録データ節を生成 |
-| `src/mirror_archive.py` | Release に退避した生データをローカルへミラー |
+| `paths.py` | 段階間で受け渡すファイル名の契約。中間ファイルの一覧はここを見れば分かる |
+| `http.py` | UA とリトライ。取得処理を1か所に集約 |
+| `catalog.py` | カタログJSONの解決と、対象年月・公開日の正規化 |
+| `fetch.py` | 交差点制御情報の zip と、交差点位置情報の HTML を一括取得 |
+| `cycle.py` | 制御CSVをストリーム処理し、`(情報源コード, 交差点番号, 年月, 時間帯)` ごとの平均サイクル長を算出 |
+| `position.py` | HTMLの `<option>` から交差点番号と座標を抽出。ページと情報源コードの対応は交差点番号の一致数で検証して決定 |
+| `join.py` | 平均サイクル長に座標を結合し、CSV / 行区切りGeoJSON / 結合レポート / 時間帯別統計を出力。GeoJSON は1交差点1フィーチャで、24時間分を属性 `c0`〜`c23` に持たせる |
+| `tiles.py` | tippecanoe を呼んで PMTiles を生成 |
+| `gate.py` | 品質ゲートの判定（純関数） |
+| `report.py` | `dataset.json` の組み立てと、README・Release ノートの生成 |
+| `cli.py` | サブコマンドの配線。判定や整形は持たない |
+
+`src/mirror_archive.py` だけは運用ツールなので独立しています（Release に退避した生データをローカルへミラー）。
 
 ### データ構造上の注意
 - **交差点名は交差点制御情報に含まれません**。制御CSV（時刻・情報源コード・交差点番号・サイクル長・スプリット＃1〜6・リンクバージョン）にも定義CSV（150列）にも名称の列は存在せず、交差点はコードでのみ識別されます。
