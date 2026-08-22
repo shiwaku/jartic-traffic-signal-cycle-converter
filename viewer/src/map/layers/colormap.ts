@@ -1,4 +1,4 @@
-import type { Theme } from './theme'
+import type { Theme } from '../../theme'
 
 /**
  * 平均サイクル長の配色。

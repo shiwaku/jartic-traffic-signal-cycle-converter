@@ -183,24 +183,64 @@ map.setPaintProperty('signal-mid', 'circle-opacity',
 
 ## 4. ビューワのコード構造
 
+実装後の構成（フェーズ2で反映済み）。最大のファイルが 166 行になり、531 行の `main.ts` は
+41 行の配線だけになった。
+
 ```
 viewer/src/
-  main.ts              配線のみ（〜50行）
-  state.ts             単一ストア（hour/playing/theme/basemap/layers/selection）+ URL・localStorage 同期
+  main.ts (41)          配線のみ
+  state.ts (85)         単一ストア + localStorage 同期
+  theme.ts (1)          Theme 型
+  diag.ts (71)          ?debug の診断HUD と WebGL コンテキスト消失のログ
+  pwa.ts (16)           Service Worker 登録
+  lib/
+    store.ts (32)       get / set / subscribe だけの小さなストア
+    format.ts (26)      esc / prop / row / coordFooter
+    sparkline.ts (65)   汎用の折れ線SVG
+    env.ts (2)          isMobile
   map/
-    createMap.ts       Map 生成とコントロール
-    basemap.ts         スタイル解決（ダーク化はビルド時に事前生成）
-    highlight.ts       選択地物のハイライト
-    popup.ts           ポップアップの組み立て
+    createMap.ts (44)   Map 生成とコントロール
+    basemap.ts (119)    スタイル解決
+    dataLayers.ts (120) レイヤーの着脱・z順・paint 反映・スタイル再読込
+    highlight.ts (71)   選択地物のハイライト
+    popup.ts (43)       ポップアップの開閉
+    interactions.ts (37) クリック・ホバー → 選択
     layers/
-      registry.ts      LayerDef は immutable な「定義」だけ（on/opacity を持たない）
-      signal.ts        spec / 配色 / 凡例 / ポップアップをレイヤー単位で1ファイルに
-      did.ts
+      types.ts (63)     LayerDef / LayerModule の型
+      registry.ts (20)  レイヤーの並び（＝z順）
+      signal.ts (166)   spec / 配色 / 凡例 / ポップアップ
+      did.ts (66)
+      colormap.ts (86)  plasma 配色
   ui/
-    timebar.ts  layerPanel.ts  legend.ts  basemapSwitch.ts  themeToggle.ts
-  lib/  format.ts  dom.ts  sparkline.ts
-  diag.ts  pwa.ts
+    layerPanel.ts (125) レイヤーの ON/OFF・不透明度・説明・凡例
+    hourControl.ts (39) 時間帯スライダーと巡回再生
+    basemapSwitch.ts (48)
+    themeToggle.ts (22)
+    legend.ts (17)
+    panel.ts (19)       パネル開閉
 ```
+
+`main.ts` は生成関数を並べるだけになっている。
+
+```ts
+const store = createAppStore()
+const map = createMap('map', store.get())
+
+const highlight = createHighlight(map, store)
+createDataLayers(map, store, highlight)
+createInteractions(map, store)
+createPopup(map, store)
+createBasemapSwitch(map, store)
+
+createThemeToggle(store)
+createPanel()
+createHourControl(store)
+createLayerPanel(store)
+```
+
+設計時に `ui/timebar.ts` としていたものは、現状まだパネル内のスライダーなので
+`ui/hourControl.ts` とした。フェーズ3で常設タイムバーに作り替えるときに改名する。
+URL 同期はフェーズ3（UI 刷新）に含める。
 
 ### 4.1 状態
 
@@ -361,8 +401,8 @@ tests/
 
 | | 内容 | 効く症状 |
 |---|---|---|
-| **1** | データモデル wide 化（join / tiles + viewer の layers・配色） | パフォーマンス、低ズームのバグ、以降の土台 |
-| **2** | ビューワの state 分離とディレクトリ再編 | 変更しづらさ |
+| **1** | データモデル wide 化（join / tiles + viewer の layers・配色） ✅ | パフォーマンス、低ズームのバグ、以降の土台 |
+| **2** | ビューワの state 分離とディレクトリ再編 ✅ | 変更しづらさ |
 | **3** | UI 刷新（タイムバー・凡例・スパークライン・URL 状態） | 見た目・使いにくさ |
 | **4** | パイプラインのパッケージ化・テスト・ゲート強化 | 変更しづらさ |
 
