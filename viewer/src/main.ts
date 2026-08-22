@@ -6,8 +6,10 @@ import { createInteractions } from './map/interactions'
 import { createPopup } from './map/popup'
 import { registerServiceWorker } from './pwa'
 import { createAppStore } from './state'
+import { syncUrlState } from './urlState'
 import { createBasemapSwitch } from './ui/basemapSwitch'
-import { createHourControl } from './ui/hourControl'
+import { createDatasetInfo } from './ui/datasetInfo'
+import { createTimebar } from './ui/timebar'
 import { createLayerPanel } from './ui/layerPanel'
 import { createPanel } from './ui/panel'
 import { createThemeToggle } from './ui/themeToggle'
@@ -27,9 +29,11 @@ createBasemapSwitch(map, store)
 // UI 側
 createThemeToggle(store)
 createPanel()
-createHourControl(store)
+createTimebar(store)
 createLayerPanel(store)
+createDatasetInfo()
 
+syncUrlState(store)
 createDiag(map, store)
 registerServiceWorker()
 

@@ -1,5 +1,6 @@
 import { createStore, type Store } from './lib/store'
 import { LAYERS } from './map/layers/registry'
+import { readUrlState } from './urlState'
 import type { Basemap } from './map/basemap'
 import type { Theme } from './theme'
 
@@ -46,13 +47,16 @@ function initialLayers(): Record<string, LayerState> {
 }
 
 export function createAppStore(): AppStore {
+  const defaults = initialLayers()
+  // URL に載っていればそれを優先する（共有されたリンクを開いた場合）。
   const store = createStore<AppState>({
     hour: 0,
     playing: false,
     theme: savedTheme(),
     basemap: 'pale',
-    layers: initialLayers(),
+    layers: defaults,
     selection: null,
+    ...readUrlState(defaults),
   })
 
   // テーマだけは次回の訪問にも引き継ぐ。
@@ -76,10 +80,4 @@ export function setLayerState(store: AppStore, key: string, patch: Partial<Layer
   const next = { ...layers[key], ...patch }
   if (layers[key].visible === next.visible && layers[key].opacity === next.opacity) return
   store.set({ layers: { ...layers, [key]: next } })
-}
-
-export function setAllLayersVisible(store: AppStore, visible: boolean): void {
-  const layers = store.get().layers
-  const next = Object.fromEntries(Object.entries(layers).map(([k, v]) => [k, { ...v, visible }]))
-  store.set({ layers: next })
 }

@@ -21,7 +21,7 @@ https://shiwaku.github.io/jartic-traffic-signal-cycle-converter/
 | 結合率 | 97.34%（[data/join_report.json](data/join_report.json) に情報源コード別の内訳） |
 <!-- dataset:end -->
 
-サイクル長は青・黄・赤が一巡する周期の長さで、交通量の多い交差点ほど長くなる傾向があります。
+サイクル長は青・黄・赤が一巡する周期の長さで、交通量の多い交差点ほど長くなる傾向があります。全国の中央値は深夜が約100秒、朝8時と夕方17時に約138秒のピークがあります（[data/hourly_stats.json](data/hourly_stats.json)）。
 
 ### 結合率について
 交差点制御情報には座標が無く、交差点は `情報源コード + 交差点番号` でしか識別できません。座標は日本交通管理技術協会の[交差点位置情報](https://www.tmt.or.jp/research/index10.html#japanMap)から取得して結合しています。両者の収録範囲は完全には一致しないため、結合率をデータ品質の指標として `data/join_report.json` に記録し、更新のたびに差分を追えるようにしています。
@@ -115,7 +115,7 @@ python3 src/mirror_archive.py
 | `src/calc_average_cycle.py` | 制御CSVをストリーム処理し、`(情報源コード, 交差点番号, 年月, 時間帯)` ごとの平均サイクル長を算出 |
 | `src/intersection_position_getHTML.py` | 日本交通管理技術協会の交差点位置情報ページを取得 |
 | `src/HTMLtoCSV.py` | HTMLの `<option>` から交差点番号と座標を抽出。ページと情報源コードの対応は交差点番号の一致数で検証して決定 |
-| `src/csvfile-add-latlon.py` | 平均サイクル長に座標を結合し、CSV / 行区切りGeoJSON / 結合レポートを出力。GeoJSON は1交差点1フィーチャで、24時間分を属性 `c0`〜`c23` に持たせる |
+| `src/csvfile-add-latlon.py` | 平均サイクル長に座標を結合し、CSV / 行区切りGeoJSON / 結合レポート / 時間帯別統計を出力。GeoJSON は1交差点1フィーチャで、24時間分を属性 `c0`〜`c23` に持たせる |
 | `src/run_pipeline.py` | 上記を1コマンドで通し、品質ゲートを通ったものだけを `data/` に反映 |
 | `src/update_docs.py` | `dataset.json` から README の収録データ節を生成 |
 | `src/mirror_archive.py` | Release に退避した生データをローカルへミラー |
@@ -147,11 +147,12 @@ gh release download --pattern "signal_cycle.pmtiles" --dir data
 `main` への push、または update-data の完了時に GitHub Actions がビューワをビルドし、最新 Release の PMTiles を同梱して GitHub Pages へ配信します。ビューワのタイトルとレイヤー説明の対象年月は `data/dataset.json` からビルド時に埋め込まれます。
 
 機能:
-- 時間帯スライダー（0〜23時）と巡回再生
-- 平均サイクル長の段階配色（100秒未満〜160秒以上の8段階）
+- 画面下端に常設した時間帯バー（0〜23時のスライダーと巡回再生）。全国の時間帯別プロファイル（p25〜p75の帯と中央値）を軸に重ねてある
+- 表示状態は URL に載る（`?h=7&l=signal&t=dark&b=photo#12/35.17/136.90`）ので、そのまま共有できる
+- 平均サイクル長の連続配色（plasma 系・70〜180秒。実データの p1〜p99 に合わせた固定ドメイン）
 - 背景切替（国土地理院 最適化ベクトルタイル / 全国最新写真）、ライト・ダークテーマ
 - レイヤーごとの表示切替・不透明度・インライン凡例
-- クリックで属性ポップアップ（Google Maps / Street View リンク付き）
+- クリックで属性ポップアップ。24時間の推移をスパークラインで表示し、最短・最長とその時刻、情報源コードの都道府県名を出す（Google Maps / Street View リンク付き）
 
 ## ライセンス
 本リポジトリのソースコードはApache License 2.0で提供されます。

@@ -281,6 +281,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     write_texts(work, dataset, source_code_diff(report, old_report))
 
     shutil.copy2(new_report_path, data_dir / "join_report.json")
+    # 時間帯別の全国分布。ビューワのタイムバーがビルド時に読み込む。
+    shutil.copy2(work / "hourly_stats.json", data_dir / "hourly_stats.json")
     dataset_path.write_text(json.dumps(dataset, ensure_ascii=False, indent=2) + "\n",
                             encoding="utf-8")
     if args.pmtiles_out:

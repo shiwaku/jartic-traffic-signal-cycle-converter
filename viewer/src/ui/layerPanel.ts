@@ -1,6 +1,6 @@
 import { LAYERS } from '../map/layers/registry'
 import type { LayerModule } from '../map/layers/types'
-import { setAllLayersVisible, setLayerState, type AppStore } from '../state'
+import { setLayerState, type AppStore } from '../state'
 import { legendMarkup } from './legend'
 
 /** レイヤーの ON/OFF・不透明度・説明・凡例。凡例は各レイヤー直下にインライン表示する。 */
@@ -102,20 +102,15 @@ export function createLayerPanel(store: AppStore): void {
       const s = layers[mod.def.key]
       row.check.checked = s.visible
       row.opacityBox.hidden = !s.visible
-      row.legend.hidden = !s.visible
       if (row.range.value !== String(s.opacity)) row.range.value = String(s.opacity)
       row.opValue.textContent = percent(s.opacity)
-      // テーマで配色が変わるため、凡例は表示のたびに作り直す
-      row.legend.innerHTML = legendMarkup(mod.legend({ hour, theme }))
+      // 連続量のグラデーション凡例はタイムバーが持つ（パネルを畳んでも読めるように）。
+      // ここに出すのはカテゴリの色見本だけ。テーマで配色が変わるので毎回作り直す。
+      const legend = mod.legend({ hour, theme })
+      row.legend.innerHTML = legend.kind === 'items' ? legendMarkup(legend) : ''
+      row.legend.hidden = !s.visible || legend.kind !== 'items'
     }
   }
-
-  ;(document.getElementById('all-on') as HTMLButtonElement).addEventListener('click', () =>
-    setAllLayersVisible(store, true),
-  )
-  ;(document.getElementById('all-off') as HTMLButtonElement).addEventListener('click', () =>
-    setAllLayersVisible(store, false),
-  )
 
   store.subscribe((s, prev) => {
     if (s.layers !== prev.layers || s.theme !== prev.theme) render()

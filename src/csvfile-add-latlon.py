@@ -81,6 +81,7 @@ def main() -> None:
             matched += 1
 
     write_geojsonl(out_geojsonl, by_intersection, positions)
+    write_hourly_stats(out_dir / "hourly_stats.json", by_intersection)
 
     rate = matched / total * 100 if total else 0
     print(f"完了: {out_csv} / {out_geojsonl}", file=sys.stderr)
@@ -108,6 +109,39 @@ def write_geojsonl(path: Path, by_intersection: dict, positions: dict) -> None:
                 "properties": props,
             }
             f.write(json.dumps(feature, ensure_ascii=False) + "\n")
+
+
+def write_hourly_stats(path: Path, by_intersection: dict) -> None:
+    """時間帯ごとの全国分布（四分位）を書き出す。
+
+    ビューワのタイムバーが「その時間帯は全国的に長いのか」を示すために使う。全国値なので
+    地図の表示範囲に依らず、毎回タイルから数え直すよりここで一度求めるほうが素直。
+    品質ゲートの「中央値の前回比」もこの値を見る。
+    """
+    by_hour: dict[int, list[int]] = {}
+    for hours in by_intersection.values():
+        for hour, value in hours.items():
+            by_hour.setdefault(hour, []).append(value)
+
+    def quantile(sorted_values: list[int], q: float) -> int:
+        return sorted_values[min(len(sorted_values) - 1, int(len(sorted_values) * q))]
+
+    stats = []
+    for hour in range(24):
+        values = sorted(by_hour.get(hour, []))
+        if not values:
+            stats.append({"時間帯": hour, "件数": 0})
+            continue
+        stats.append({
+            "時間帯": hour,
+            "件数": len(values),
+            "p25": quantile(values, 0.25),
+            "中央値": quantile(values, 0.5),
+            "p75": quantile(values, 0.75),
+        })
+
+    path.write_text(json.dumps(stats, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    print(f"  時間帯別統計: {path}", file=sys.stderr)
 
 
 def write_report(path: Path, average_path: Path, positions: dict,
