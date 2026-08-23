@@ -1,25 +1,17 @@
 # -*- coding: utf-8 -*-
-"""交差点位置情報のHTMLから、交差点番号と座標を取り出してCSVにする。
+"""交差点位置情報のHTMLから、交差点番号と座標を取り出す。
 
 ページ内の <option value="…" lon="…" lat="…">交差点番号</option> が交差点1件に対応する。
 value 属性は全国通しの連番で、制御情報の交差点番号ではない。**交差点番号はタグのテキスト**。
 （例: 函館のページは value=263 / テキスト=1）
 
 交差点番号は情報源コード（都道府県警察・方面）ごとの連番のため、情報源コードとの組でしか
-一意にならない。ページと情報源コードの対応は、カタログの id（R01_1 / R02 …）から
-ページ名 index10_{都道府県番号}[_{方面番号}].html を組み立てて求める。ただし北海道5方面は
+一意にならない。ページと情報源コードの対応はカタログの id から組み立てるが、北海道5方面は
 ページの並びと JARTIC の都市の並びが一致しないため、都道府県ごとに交差点番号の集合が
 最もよく一致する組み合わせを選び直す（対応が正しいことをデータで検証してから採用する）。
-
-出力:
-  {out}/intersection_position.csv  情報源コード,交差点番号,lon,lat
-
-使い方:
-  python3 src/HTMLtoCSV.py --catalog work/zip/catalog.json \
-      --source-codes work/source_codes.json --average work/national_average_cycle.csv \
-      --html work/html --out work
 """
-import argparse
+from __future__ import annotations
+
 import csv
 import json
 import re
@@ -28,23 +20,24 @@ from collections import defaultdict
 from itertools import permutations
 from pathlib import Path
 
+from . import catalog
+from .fetch import page_name
+from .paths import WorkPaths
+
 OPTION_RE = re.compile(r"<option\b([^>]*)>([^<]*)</option>", re.IGNORECASE)
 ATTR_RE = re.compile(r"""(\w+)\s*=\s*["']([^"']*)["']""")
 
-
-def page_name(target_id: str) -> str:
-    body = target_id.lstrip("R")
-    parts = body.split("_")
-    return f"index10_{int(parts[0])}{'_' + parts[1] if len(parts) > 1 else ''}.html"
+# 総当たりは件数の階乗になる。北海道の5方面（120通り）が現状の最大だが、将来コードが
+# 増えても破綻しないよう、この数を超えたら貪欲法に切り替える。
+MAX_PERMUTATION_CODES = 7
 
 
 def pref_no(target_id: str) -> int:
     return int(target_id.lstrip("R").split("_")[0])
 
 
-def parse_page(path: Path) -> list[tuple[str, str, str]]:
+def parse_options(text: str) -> list:
     """(交差点番号, lon, lat) のリスト。座標のない選択肢（先頭の「－」）は捨てる。"""
-    text = path.read_text(encoding="utf-8", errors="replace")
     out = []
     for attrs_str, label in OPTION_RE.findall(text):
         attrs = dict(ATTR_RE.findall(attrs_str))
@@ -55,7 +48,7 @@ def parse_page(path: Path) -> list[tuple[str, str, str]]:
     return out
 
 
-def load_control_numbers(path: Path) -> dict[str, set]:
+def load_control_numbers(path: Path) -> dict:
     """情報源コード → 交差点番号の集合（制御情報側）。"""
     numbers = defaultdict(set)
     with path.open(encoding="utf-8") as f:
@@ -64,12 +57,7 @@ def load_control_numbers(path: Path) -> dict[str, set]:
     return numbers
 
 
-# 総当たりは件数の階乗になる。北海道の5方面（120通り）が現状の最大だが、将来コードが
-# 増えても破綻しないよう、この数を超えたら貪欲法に切り替える。
-MAX_PERMUTATION_CODES = 7
-
-
-def best_assignment(pages: list[str], codes: list[str], page_nums: dict, code_nums: dict):
+def best_assignment(pages: list, codes: list, page_nums: dict, code_nums: dict) -> tuple:
     """ページと情報源コードの対応のうち、交差点番号の一致数が最大の組み合わせを返す。"""
     if len(codes) > MAX_PERMUTATION_CODES:
         return greedy_assignment(pages, codes, page_nums, code_nums)
@@ -81,14 +69,14 @@ def best_assignment(pages: list[str], codes: list[str], page_nums: dict, code_nu
     return best, best_score
 
 
-def greedy_assignment(pages: list[str], codes: list[str], page_nums: dict, code_nums: dict):
+def greedy_assignment(pages: list, codes: list, page_nums: dict, code_nums: dict) -> tuple:
     """一致数の大きいペアから順に確定させる（総当たりが現実的でない件数のとき）。"""
     pairs = sorted(
         ((len(page_nums[p] & code_nums.get(c, set())), p, c) for p in pages for c in codes),
         key=lambda x: -x[0])
-    assigned: dict[str, str] = {}
-    used_codes: set[str] = set()
-    for score, page, code in pairs:
+    assigned: dict = {}
+    used_codes: set = set()
+    for _score, page, code in pairs:
         if page in assigned or code in used_codes:
             continue
         assigned[page] = code
@@ -98,50 +86,39 @@ def greedy_assignment(pages: list[str], codes: list[str], page_nums: dict, code_
     return order, total
 
 
-def main() -> None:
-    p = argparse.ArgumentParser()
-    p.add_argument("--catalog", default="work/zip/catalog.json")
-    p.add_argument("--source-codes", default="work/source_codes.json")
-    p.add_argument("--average", default="work/national_average_cycle.csv")
-    p.add_argument("--html", default="work/html")
-    p.add_argument("--out", default="work")
-    args = p.parse_args()
-
-    entry = json.loads(Path(args.catalog).read_text(encoding="utf-8"))
-    zip_codes = json.loads(Path(args.source_codes).read_text(encoding="utf-8"))
-    code_nums = load_control_numbers(Path(args.average))
-    html_dir = Path(args.html)
-    out_dir = Path(args.out)
-    out_dir.mkdir(parents=True, exist_ok=True)
+def run(work: WorkPaths) -> None:
+    entry = catalog.load_entry(work.catalog)
+    zip_codes = json.loads(work.source_codes.read_text(encoding="utf-8"))
+    code_nums = load_control_numbers(work.average_csv)
 
     # 都道府県ごとに、ページと情報源コードをまとめる
-    groups: dict[int, dict[str, list]] = defaultdict(lambda: {"pages": [], "codes": []})
-    parsed: dict[str, list[tuple[str, str, str]]] = {}
-    warnings: list[str] = []
+    groups: dict = defaultdict(lambda: {"pages": [], "codes": []})
+    parsed: dict = {}
+    warnings: list = []
 
     for target in entry["targetList"]:
         name = page_name(target["id"])
-        path = html_dir / name
+        path = work.html_dir / name
         if not path.exists():
             warnings.append(f"{name}: HTML未取得")
             continue
-        codes = zip_codes.get(target["link"].split("/")[-1], [])
+        codes = zip_codes.get(catalog.zip_name(target), [])
         if len(codes) != 1:
             warnings.append(f"{name}: 情報源コードが{len(codes)}件（{codes}）")
             continue
-        parsed[name] = parse_page(path)
+        parsed[name] = parse_options(path.read_text(encoding="utf-8", errors="replace"))
         g = groups[pref_no(target["id"])]
         g["pages"].append(name)
         g["codes"].append(codes[0])
 
     page_nums = {n: {x[0] for x in rows} for n, rows in parsed.items()}
 
-    rows_out: list[tuple[str, str, str, str]] = []
-    fatal: list[str] = []
+    rows_out: list = []
+    fatal: list = []
     total_hit = total_ctrl = 0
     for pref in sorted(groups):
         pages, codes = groups[pref]["pages"], groups[pref]["codes"]
-        assign, score = best_assignment(pages, codes, page_nums, code_nums)
+        assign, _score = best_assignment(pages, codes, page_nums, code_nums)
         for name, code in zip(pages, assign):
             hit = len(page_nums[name] & code_nums.get(code, set()))
             ctrl = len(code_nums.get(code, set()))
@@ -155,14 +132,13 @@ def main() -> None:
             for number, lon, lat in parsed[name]:
                 rows_out.append((code, number, lon, lat))
 
-    out_csv = out_dir / "intersection_position.csv"
-    with out_csv.open("w", newline="", encoding="utf-8") as f:
+    with work.position_csv.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["情報源コード", "交差点番号", "lon", "lat"])
         w.writerows(rows_out)
 
     rate = total_hit / total_ctrl * 100 if total_ctrl else 0
-    print(f"完了: {out_csv}  {len(rows_out):,}件", file=sys.stderr)
+    print(f"完了: {work.position_csv}  {len(rows_out):,}件", file=sys.stderr)
     print(f"  制御情報の交差点 {total_ctrl:,}箇所のうち {total_hit:,}箇所に位置あり（{rate:.1f}%）",
           file=sys.stderr)
     for w_ in warnings:
@@ -172,7 +148,3 @@ def main() -> None:
     # 先に進むと結合率だけが静かに落ちるため、ここで止める。
     if fatal:
         raise SystemExit("交差点番号が一致しないページがあるため中断します: " + ", ".join(fatal))
-
-
-if __name__ == "__main__":
-    main()

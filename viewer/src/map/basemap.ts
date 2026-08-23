@@ -1,6 +1,6 @@
 import type { StyleSpecification } from 'maplibre-gl'
-import paleStyle from './pale-style.json'
-import type { Theme } from './theme'
+import paleStyle from '../pale-style.json'
+import type { Theme } from '../theme'
 
 // ---- 色ユーティリティ（明度反転でダーク化するため） ----
 

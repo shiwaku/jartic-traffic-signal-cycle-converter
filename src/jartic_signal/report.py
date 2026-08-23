@@ -1,25 +1,21 @@
 # -*- coding: utf-8 -*-
-"""dataset.json / join_report.json から README の収録データ節を書き換える。
+"""dataset.json の組み立てと、README・Release ノートの生成。
 
 対象年月や交差点数を人が転記すると、データだけ更新して文言が古いまま残る。
-README 側にマーカーを置き、その中身だけを生成する。
-
-  <!-- dataset:begin --> … <!-- dataset:end -->   収録データの表
-  <!-- lowjoin:begin --> … <!-- lowjoin:end -->   結合率が低い情報源コードの表
-
-情報源コードと都道府県の対応は**カタログの並び順から推測してはいけない**（実測で 3010=埼玉 /
-3011=千葉 であり、並び順どおりではない）。zip の中身から得た source_codes.json とカタログを
-突き合わせて求め、結果を data/source_names.json に残して次回以降の表示に使う。
-
-使い方:
-  python3 src/update_docs.py --dataset data/dataset.json --report data/join_report.json \
-      --codes work/source_codes.json --catalog work/zip/catalog.json
+dataset.json を単一の情報源にして、README のこの節もビューワの表示もそこから生成する。
 """
-import argparse
+from __future__ import annotations
+
 import json
 import re
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from . import catalog
+from .paths import DataPaths, WorkPaths
+
+JST = timezone(timedelta(hours=9))
 
 # 情報源コードは都道府県警察（北海道のみ方面）ごとに振られる。表示用の名前を引くために使う。
 PREFS = [
@@ -35,19 +31,80 @@ HOKKAIDO_AREAS = {"sapporo": "札幌", "hakodate": "函館", "asahikawa": "旭�
 LOW_JOIN_THRESHOLD = 95.0  # この結合率を下回る情報源コードを README に列挙する
 
 
+def count_rows(path: Path) -> int:
+    """ヘッダーを除いた行数。"""
+    with path.open(encoding="utf-8") as f:
+        return max(sum(1 for _ in f) - 1, 0)
+
+
+def load_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+
+def build_dataset(year_month: str, release_day: str, report: dict, quality: dict,
+                  total_rows: int, joined_rows: int, pmtiles: Path) -> dict:
+    """公開するデータセットの要約。品質ゲートはこの前回分と今回分を比べる。"""
+    return {
+        "対象年月": year_month,
+        "対象年月_表示": catalog.display_month(year_month),
+        "公開日": release_day,
+        "交差点数": report["制御情報の交差点数"],
+        "位置情報が付与された交差点数": report["位置情報が付与された交差点数"],
+        "レコード数": total_rows,
+        "結合レコード数": joined_rows,
+        "行の結合率": report["行の結合率"],
+        "サイクル長中央値": quality["サイクル長中央値"],
+        "値域外レコード数": quality["値域外レコード数"],
+        "時間帯が欠けている交差点数": quality["時間帯が欠けている交差点数"],
+        "範囲外の座標数": quality["範囲外の座標数"],
+        "PMTilesバイト数": pmtiles.stat().st_size if pmtiles.exists() else 0,
+        "生成日時": datetime.now(JST).isoformat(timespec="seconds"),
+        "出典": {
+            "交差点制御情報": catalog.CATALOG_URL,
+            "交差点位置情報": catalog.POSITION_URL,
+        },
+    }
+
+
+# ---- Release ノートとコミットメッセージ ----
+
+def write_texts(work: WorkPaths, ds: dict, diff: list) -> None:
+    """YAML の中に整形処理を持ち込まずに済み、ローカル実行でも同じ文面を確認できる。"""
+    lines = [
+        f"対象年月 {ds['対象年月_表示']}（JARTIC公開 {ds['公開日']}）",
+        f"交差点 {ds['交差点数']:,}箇所（うち座標付与 {ds['位置情報が付与された交差点数']:,}）",
+        f"{ds['レコード数']:,}レコード / 行の結合率 {ds['行の結合率']}%",
+        f"サイクル長の中央値 {ds['サイクル長中央値']}秒 / PMTiles {ds['PMTilesバイト数'] / 1e6:.1f}MB",
+    ]
+    if diff:
+        lines += ["", "情報源コード別の結合率の変化:"]
+        lines += [f"- {code}: {before}% → {after}%（{delta:+.1f}pt）"
+                  for code, before, after, delta in diff]
+    work.release_notes.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    commit = [f"データを{ds['対象年月']}分に更新", "",
+              f"交差点 {ds['交差点数']:,}箇所 / {ds['レコード数']:,}レコード / "
+              f"結合率 {ds['行の結合率']}%",
+              f"PMTiles は Release data-{ds['対象年月']} に添付。生zipは退避済み。"]
+    work.commit_message.write_text("\n".join(commit) + "\n", encoding="utf-8")
+
+
+# ---- README ----
+
 def build_code_names(catalog_path: Path, codes_path: Path) -> dict:
     """情報源コード → 表示名（例: 3001 → 北海道（札幌）、301C → 三重）。
 
     zip 名（typeC_{都市}_{年}_{月}.zip）とカタログの id を突き合わせて求める。zip の中に
     どのコードが入っていたかは source_codes.json が持っているので、推測は入らない。
+    並び順から推測してはいけない（実測で 3010=埼玉 / 3011=千葉 であり、並び順とは違う）。
     """
-    if not (catalog_path and catalog_path.exists() and codes_path and codes_path.exists()):
+    if not (catalog_path.exists() and codes_path.exists()):
         return {}
-    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    entry = json.loads(catalog_path.read_text(encoding="utf-8"))
     zip_codes = json.loads(codes_path.read_text(encoding="utf-8"))
     names = {}
-    for target in catalog.get("targetList", []):
-        filename = target["link"].split("/")[-1]
+    for target in entry.get("targetList", []):
+        filename = catalog.zip_name(target)
         codes = zip_codes.get(filename, [])
         if len(codes) != 1:
             continue
@@ -94,39 +151,23 @@ def replace_block(text: str, key: str, body: str) -> str:
     return pattern.sub(lambda m: m.group(1) + body + m.group(2), text)
 
 
-def main() -> None:
-    p = argparse.ArgumentParser()
-    p.add_argument("--dataset", default="data/dataset.json")
-    p.add_argument("--report", default="data/join_report.json")
-    p.add_argument("--readme", default="README.md")
-    p.add_argument("--codes", default="work/source_codes.json")
-    p.add_argument("--catalog", default="work/zip/catalog.json")
-    p.add_argument("--names", default="data/source_names.json",
-                   help="情報源コード → 都道府県名。解決できたら更新し、できなければ読む")
-    args = p.parse_args()
+def update_readme(readme: Path, data: DataPaths, work: WorkPaths) -> None:
+    ds = json.loads(data.dataset.read_text(encoding="utf-8"))
+    report = json.loads(data.join_report.read_text(encoding="utf-8"))
 
-    ds = json.loads(Path(args.dataset).read_text(encoding="utf-8"))
-    report = json.loads(Path(args.report).read_text(encoding="utf-8"))
-
-    names_path = Path(args.names)
-    names = build_code_names(Path(args.catalog), Path(args.codes))
+    names = build_code_names(work.catalog, work.source_codes)
     if names:
-        names_path.parent.mkdir(parents=True, exist_ok=True)
-        names_path.write_text(json.dumps(names, ensure_ascii=False, indent=2) + "\n",
-                              encoding="utf-8")
-    elif names_path.exists():
-        names = json.loads(names_path.read_text(encoding="utf-8"))
-        print(f"注意: zip が無いため {names_path} の対応表を使います", file=sys.stderr)
+        data.mkdirs()
+        data.source_names.write_text(json.dumps(names, ensure_ascii=False, indent=2) + "\n",
+                                     encoding="utf-8")
+    elif data.source_names.exists():
+        names = json.loads(data.source_names.read_text(encoding="utf-8"))
+        print(f"注意: zip が無いため {data.source_names} の対応表を使います", file=sys.stderr)
     else:
         print("注意: 情報源コードの名前を解決できないため都道府県欄を空にします", file=sys.stderr)
 
-    readme = Path(args.readme)
     text = readme.read_text(encoding="utf-8")
     text = replace_block(text, "dataset", dataset_table(ds))
     text = replace_block(text, "lowjoin", low_join_table(ds, report, names))
     readme.write_text(text, encoding="utf-8")
     print(f"更新: {readme}（対象年月 {ds['対象年月_表示']}）")
-
-
-if __name__ == "__main__":
-    main()

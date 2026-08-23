@@ -32,28 +32,16 @@
     <div id="panel-body" class="panel-body">
       <div class="field">
         <div class="field-head">
-          <span class="field-label">時間帯</span>
-          <div class="field-actions">
-            <button id="play-btn" class="mini-btn" type="button" aria-pressed="false">▶ 再生</button>
-          </div>
+          <span class="field-label">レイヤー</span>
         </div>
-        <div class="hour">
-          <output id="hour-label" class="hour-label" for="hour-slider">0時</output>
-          <input id="hour-slider" class="hour-slider" type="range" min="0" max="23" step="1" value="0"
-                 aria-label="表示する時間帯" />
-          <div class="hour-ticks"><span>0時</span><span>6時</span><span>12時</span><span>18時</span><span>23時</span></div>
-        </div>
+        <div id="layers" class="toggles"></div>
       </div>
 
       <div class="field">
         <div class="field-head">
-          <span class="field-label">レイヤー</span>
-          <div class="field-actions">
-            <button id="all-on" class="mini-btn" type="button">全ON</button>
-            <button id="all-off" class="mini-btn" type="button">全OFF</button>
-          </div>
+          <span class="field-label">収録データ</span>
         </div>
-        <div id="layers" class="toggles"></div>
+        <dl id="dataset-info" class="dataset-info"></dl>
       </div>
     </div>
 
@@ -65,6 +53,32 @@
       <a href="https://github.com/shiwaku/jartic-traffic-signal-cycle-converter" target="_blank" rel="noopener">GitHub</a>
       <span id="build-ver" class="build-ver"></span>
     </footer>
+  </section>
+
+  <!-- 画面下端に常設する時間帯バー。一番よく使う操作なので、パネルを畳んでいても触れる位置に置く。
+       スライダーの軸に全国の時間帯別プロファイル（p25〜p75の帯と中央値）を重ね、
+       いま見ている時間帯が1日の中でどのあたりかが分かるようにしている。 -->
+  <section id="timebar" class="timebar" aria-label="時間帯">
+    <button id="play-btn" class="tb-play" type="button" aria-pressed="false" aria-label="時間帯を順に再生"></button>
+
+    <div class="tb-main">
+      <div class="tb-track">
+        <svg id="tb-chart" class="tb-chart" viewBox="0 0 23 100" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <div id="tb-cursor" class="tb-cursor" aria-hidden="true"></div>
+        <input id="hour-slider" class="tb-slider" type="range" min="0" max="23" step="1" value="0"
+               aria-label="表示する時間帯" />
+      </div>
+      <div class="tb-ticks" aria-hidden="true">
+        <span>0時</span><span>6時</span><span>12時</span><span>18時</span><span>23時</span>
+      </div>
+    </div>
+
+    <div class="tb-readout">
+      <output id="hour-label" class="tb-hour" for="hour-slider">0時</output>
+      <span id="hour-stat" class="tb-stat"></span>
+    </div>
+
+    <div id="tb-legend" class="tb-legend"></div>
   </section>
 
   <script type="module" src="/src/main.ts"></script>

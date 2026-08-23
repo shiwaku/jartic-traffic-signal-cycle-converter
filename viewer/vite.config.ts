@@ -83,7 +83,9 @@ function pmtilesDevServer(): Plugin {
 export default defineConfig({
   base: './',
   plugins: [pmtilesDevServer(), datasetHtml()],
-  server: { port: 8000 },
+  // data/source_names.json（情報源コード→都道府県名）を viewer から import するため、
+  // dev サーバーにリポジトリ直下の読み取りを許可する。
+  server: { port: 8000, fs: { allow: [rootDir, resolve(rootDir, '..', 'data')] } },
   define: {
     __BUILD_TIME__: JSON.stringify(new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC'),
     __TARGET_MONTH__: JSON.stringify(TARGET_MONTH),
