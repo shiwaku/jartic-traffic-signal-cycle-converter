@@ -512,6 +512,10 @@ data 更新のワークフローは、取り込みの前にこれを通す。
 
 ## 10. 未決事項
 
-* plasma のトリム範囲（ライト 0.00〜0.85 / ダーク 0.15〜1.00）は実物を見て微調整する
-* ダークテーマで人口集中地区（琥珀色・不透明度20%）が背景を黄色く濁らせる。テーマ別の
-  塗り色を持たせるか検討する
+issue に起票済み。
+
+* [#9](https://github.com/shiwaku/jartic-traffic-signal-cycle-converter/issues/9)
+  plasma のトリム範囲（ライト 0.00〜0.85 / ダーク 0.15〜1.00）を実物を見て詰める
+* [#8](https://github.com/shiwaku/jartic-traffic-signal-cycle-converter/issues/8)
+  ダークテーマで人口集中地区（琥珀色・不透明度20%）が背景を黄色く濁らせる。テーマ別の
+  塗り色を持たせるか、暗い地図では輪郭線にするかを検討する
