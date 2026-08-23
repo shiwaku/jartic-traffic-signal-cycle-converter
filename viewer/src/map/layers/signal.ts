@@ -42,7 +42,7 @@ const layerIds = SUBS.map((s) => `${KEY}-${s.suffix}`)
 
 /** 平均サイクル長 → 色の連続補間式。時間帯ごとに参照する属性が変わる。 */
 function colorExpr(ctx: RenderContext): ExpressionSpecification {
-  const stops = cycleRamp(ctx.theme).flatMap((s) => [s.value, s.color])
+  const stops = cycleRamp().flatMap((s) => [s.value, s.color])
   return [
     'interpolate',
     ['linear'],
@@ -111,14 +111,16 @@ export const signalLayer: LayerModule = {
     ])
   },
 
-  legend(ctx: RenderContext) {
+  legend() {
     const { min, max } = CYCLE_DOMAIN
+    // 中央の目盛りは全国の中央値（120秒）に置く。アンカーが等間隔でないので位置も実値から出す。
+    const median = 120
     return {
       kind: 'gradient',
-      css: cycleGradientCss(ctx.theme),
+      css: cycleGradientCss(),
       ticks: [
         { pos: 0, label: `${min}秒以下` },
-        { pos: 50, label: `${(min + max) / 2}` },
+        { pos: ((median - min) / (max - min)) * 100, label: `${median}` },
         { pos: 100, label: `${max}秒以上` },
       ],
     }
@@ -147,7 +149,7 @@ export const signalLayer: LayerModule = {
     const spark = sparklineSvg({
       values,
       highlight: ctx.hour,
-      colorAt: (v) => cycleColorAt(v, ctx.theme),
+      colorAt: (v) => cycleColorAt(v),
       label: '24時間の平均サイクル長の推移',
     })
     const axis = spark
