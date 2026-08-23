@@ -252,13 +252,33 @@ body {
   flex: 1;
   min-width: 0;
   display: grid;
-  gap: 1px;
+  grid-template-columns: auto 1fr;
+  gap: 1px 6px;
+}
+
+/* 縦軸の目盛り。トラックと同じ高さに上下端を合わせる。 */
+.tb-yaxis {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 34px;
+  padding: 1px 0;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
 }
 
 /* スライダーのつまみの中心と、プロファイルの各時刻の x 座標を合わせるため、
    トラックの左右をつまみ半分だけ内側に寄せる。 */
 .tb-track {
   --thumb: 16px;
+  grid-column: 2;
+  grid-row: 1;
   position: relative;
   height: 34px;
   padding: 0 calc(var(--thumb) / 2);
@@ -273,11 +293,6 @@ body {
   width: calc(100% - var(--thumb));
   height: 100%;
   overflow: visible;
-}
-
-.tb-band {
-  fill: var(--accent);
-  opacity: 0.22;
 }
 
 .tb-median {
@@ -350,6 +365,8 @@ body {
 }
 
 .tb-ticks {
+  grid-column: 2;
+  grid-row: 2;
   display: flex;
   justify-content: space-between;
   padding: 0 calc(16px / 2);
@@ -860,14 +877,6 @@ body {
 
   .tb-play {
     order: 0;
-  }
-
-  /* 幅の狭い端末では、読み上げ欄がトラックの幅を食う。全国中央値は日内プロファイルの
-     形で読み取れるうえ正確な値はポップアップに出るので、いちばん狭いときだけ畳む。 */
-  @media (max-width: 480px) {
-    .tb-stat {
-      display: none;
-    }
   }
 
   .panel {

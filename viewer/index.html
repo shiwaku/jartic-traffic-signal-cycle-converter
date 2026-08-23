@@ -56,12 +56,16 @@
   </section>
 
   <!-- 画面下端に常設する時間帯バー。一番よく使う操作なので、パネルを畳んでいても触れる位置に置く。
-       スライダーの軸に全国の時間帯別プロファイル（p25〜p75の帯と中央値）を重ね、
-       いま見ている時間帯が1日の中でどのあたりかが分かるようにしている。 -->
+       スライダーの軸に全国の中央値の推移を重ね、いま見ている時間帯が1日の中でどのあたりか
+       が分かるようにしている。縦軸は秒で、両端の値を左に出す。 -->
   <section id="timebar" class="timebar" aria-label="時間帯">
     <button id="play-btn" class="tb-play" type="button" aria-pressed="false" aria-label="時間帯を順に再生"></button>
 
-    <div class="tb-main">
+    <div class="tb-main" title="全国の平均サイクル長の中央値（時間帯別）">
+      <div class="tb-yaxis" aria-hidden="true">
+        <span id="tb-ymax"></span>
+        <span id="tb-ymin"></span>
+      </div>
       <div class="tb-track">
         <svg id="tb-chart" class="tb-chart" viewBox="0 0 23 100" preserveAspectRatio="none" aria-hidden="true"></svg>
         <div id="tb-cursor" class="tb-cursor" aria-hidden="true"></div>

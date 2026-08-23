@@ -17,15 +17,17 @@ interface HourStat {
 const STATS = hourlyStats as HourStat[]
 const HOURS = 23
 
-/** 帯が上下に貼り付かないよう、実データの範囲に少し余白を足した縦軸。 */
+/**
+ * 縦軸（秒）。中央値の範囲を10秒単位に丸めて取る。
+ * 目盛りの数字をそのまま端に置けるよう、切りのいい値にしている。
+ */
 const Y_DOMAIN = (() => {
-  const lows = STATS.flatMap((s) => (s.p25 === undefined ? [] : [s.p25]))
-  const highs = STATS.flatMap((s) => (s.p75 === undefined ? [] : [s.p75]))
-  if (!lows.length) return { min: 0, max: 1 }
-  const min = Math.min(...lows)
-  const max = Math.max(...highs)
-  const pad = (max - min) * 0.08 || 1
-  return { min: min - pad, max: max + pad }
+  const medians = STATS.flatMap((s) => (s.中央値 === undefined ? [] : [s.中央値]))
+  if (!medians.length) return { min: 0, max: 1 }
+  return {
+    min: Math.floor((Math.min(...medians) - 5) / 10) * 10,
+    max: Math.ceil((Math.max(...medians) + 5) / 10) * 10,
+  }
 })()
 
 function y(value: number): number {
@@ -33,19 +35,20 @@ function y(value: number): number {
 }
 
 /**
- * 全国の時間帯別プロファイル。p25〜p75 を帯で、中央値を線で描く。
+ * 全国の中央値の推移。1本の線だけを描く。
+ *
+ * 当初は p25〜p75 の帯も重ねていたが、縦軸に目盛りが無いうえ2系列あるため、
+ * 何を表しているのか読み取れなかった。線を中央値だけにすると、縦軸の意味が
+ * 「全国中央値のサイクル長」に一意に決まり、右の読み上げ欄の数字とも直結する。
+ * 系列が減ったぶん縦の振れ幅も取れるので、朝夕のピークが読みやすくなる。
+ *
  * viewBox を横に引き伸ばして使うので、線は vector-effect で太さを保つ。
  */
 function chartMarkup(): string {
   const usable = STATS.filter((s) => s.中央値 !== undefined)
   if (usable.length < 2) return ''
-  const top = usable.map((s) => `${s.時間帯},${y(s.p75 as number).toFixed(2)}`)
-  const bottom = [...usable].reverse().map((s) => `${s.時間帯},${y(s.p25 as number).toFixed(2)}`)
   const median = usable.map((s) => `${s.時間帯},${y(s.中央値 as number).toFixed(2)}`)
-  return (
-    `<polygon class="tb-band" points="${[...top, ...bottom].join(' ')}" />` +
-    `<polyline class="tb-median" points="${median.join(' ')}" vector-effect="non-scaling-stroke" />`
-  )
+  return `<polyline class="tb-median" points="${median.join(' ')}" vector-effect="non-scaling-stroke" />`
 }
 
 /** 画面下端に常設する時間帯バー。スライダー・再生・全国プロファイル・凡例をまとめて持つ。 */
@@ -60,6 +63,11 @@ export function createTimebar(store: AppStore): void {
   let timer: number | null = null
 
   chart.innerHTML = chartMarkup()
+  // 縦軸の目盛り。単位が分かるよう上端にだけ「秒」を付ける。
+  const yMax = document.getElementById('tb-ymax')
+  const yMin = document.getElementById('tb-ymin')
+  if (yMax) yMax.textContent = `${Y_DOMAIN.max}秒`
+  if (yMin) yMin.textContent = String(Y_DOMAIN.min)
 
   slider.addEventListener('input', () => setHour(store, Number(slider.value)))
   playBtn.addEventListener('click', () => store.set({ playing: !store.get().playing }))
@@ -68,13 +76,20 @@ export function createTimebar(store: AppStore): void {
   // window で拾うと、MapLibre がキャンバスで同じキーを地図のパンに使っているため
   // 「地図が動きながら時刻も動く」二重動作になる。
 
+  // 幅の狭い端末では読み上げ欄がトラックの幅を食う。ただし消してしまうと線が何を指すのか
+  // 分からなくなるので、短くして残す。
+  const narrow = window.matchMedia('(max-width: 480px)')
+
   function renderHour(hour: number): void {
     slider.value = String(hour)
     label.textContent = `${hour}時`
     cursor.style.left = `${(hour / HOURS) * 100}%`
     const median = STATS[hour]?.中央値
-    stat.textContent = median === undefined ? '' : `全国中央値 ${median}秒`
+    stat.textContent =
+      median === undefined ? '' : `${narrow.matches ? '全国' : '全国中央値'} ${median}秒`
   }
+
+  narrow.addEventListener('change', () => renderHour(store.get().hour))
 
   function renderPlaying(playing: boolean): void {
     if (playing && timer === null) {
